@@ -1,7 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
-import { ProtonMailbox } from "./mail.js";
+import {
+  ProtonMailbox,
+  type SearchMailInput,
+  type TopSendersInput,
+} from "./mail.js";
 
 function success(output: Record<string, unknown>) {
   return {
@@ -17,6 +21,12 @@ function failure(error: unknown) {
     isError: true,
     content: [{ type: "text" as const, text: message }],
   };
+}
+
+function withoutUndefined<T extends Record<string, unknown>>(input: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined),
+  ) as Partial<T>;
 }
 
 const readOnlyAnnotations = {
@@ -93,7 +103,8 @@ export function createServer(): McpServer {
     },
     async (input) => {
       try {
-        return success(await mailbox.topSenders(input));
+        const request = withoutUndefined(input) as TopSendersInput;
+        return success(await mailbox.topSenders(request));
       } catch (error) {
         return failure(error);
       }
@@ -122,7 +133,8 @@ export function createServer(): McpServer {
     },
     async (input) => {
       try {
-        return success(await mailbox.searchMail(input));
+        const request = withoutUndefined(input) as SearchMailInput;
+        return success(await mailbox.searchMail(request));
       } catch (error) {
         return failure(error);
       }
