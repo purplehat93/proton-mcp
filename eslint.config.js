@@ -1,5 +1,5 @@
-import eslint from '@eslint/js';
-import tseslint from 'typescript-eslint';
+import eslint from "@eslint/js";
+import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   eslint.configs.recommended,
@@ -12,10 +12,10 @@ export default tseslint.config(
       },
     },
     rules: {
-      '@typescript-eslint/no-floating-promises': 'error',
+      "@typescript-eslint/no-floating-promises": "error",
     },
   },
   {
-    ignores: ['dist/**', 'node_modules/**'],
+    ignores: ["dist/**", "node_modules/**"],
   },
 );
