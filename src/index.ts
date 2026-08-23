@@ -22,7 +22,9 @@ async function run(): Promise<void> {
 
   const options = await loadHttpServerOptions();
   const running = await startHttpServer(options);
-  console.error(`proton-mcp listening on ${options.host}:${running.port} (Streamable HTTP /mcp)`);
+  console.error(
+    `proton-mcp listening on ${options.host}:${running.port} (Streamable HTTP /mcp)`,
+  );
 
   let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {
@@ -49,7 +51,10 @@ async function run(): Promise<void> {
 const entrypoint = process.argv[1];
 if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
   void run().catch((error: unknown) => {
-    console.error("proton-mcp failed to start", error instanceof Error ? error.message : error);
+    console.error(
+      "proton-mcp failed to start",
+      error instanceof Error ? error.message : error,
+    );
     process.exitCode = 1;
   });
 }

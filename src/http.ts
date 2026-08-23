@@ -58,12 +58,19 @@ function normalizeOrigin(value: string): string | null {
 }
 
 function isHostAllowed(req: IncomingMessage, allowedHosts: string[]): boolean {
-  const hostname = req.headers.host ? normalizeHostname(req.headers.host) : null;
+  const hostname = req.headers.host
+    ? normalizeHostname(req.headers.host)
+    : null;
   if (!hostname) return false;
-  return allowedHosts.some((allowed) => normalizeHostname(allowed) === hostname);
+  return allowedHosts.some(
+    (allowed) => normalizeHostname(allowed) === hostname,
+  );
 }
 
-function isOriginAllowed(req: IncomingMessage, allowedOrigins: string[]): boolean {
+function isOriginAllowed(
+  req: IncomingMessage,
+  allowedOrigins: string[],
+): boolean {
   const originHeader = req.headers.origin;
   if (!originHeader) return true;
 
@@ -78,7 +85,9 @@ function bearerMatches(req: IncomingMessage, token: string): boolean {
 
   const presented = Buffer.from(authorization.slice("Bearer ".length), "utf8");
   const expected = Buffer.from(token, "utf8");
-  return presented.length === expected.length && timingSafeEqual(presented, expected);
+  return (
+    presented.length === expected.length && timingSafeEqual(presented, expected)
+  );
 }
 
 function requestPath(req: IncomingMessage): string {
@@ -113,7 +122,9 @@ export async function loadHttpServerOptions(
 
   const port = Number(env.MCP_PORT ?? DEFAULT_PORT);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(`Invalid MCP_PORT: ${env.MCP_PORT ?? String(DEFAULT_PORT)}`);
+    throw new Error(
+      `Invalid MCP_PORT: ${env.MCP_PORT ?? String(DEFAULT_PORT)}`,
+    );
   }
 
   const allowedHosts = splitCsv(env.MCP_ALLOWED_HOSTS);
@@ -122,12 +133,15 @@ export async function loadHttpServerOptions(
     host: env.MCP_HOST ?? DEFAULT_HOST,
     port,
     token,
-    allowedHosts: allowedHosts.length > 0 ? allowedHosts : [...DEFAULT_ALLOWED_HOSTS],
+    allowedHosts:
+      allowedHosts.length > 0 ? allowedHosts : [...DEFAULT_ALLOWED_HOSTS],
     allowedOrigins: splitCsv(env.MCP_ALLOWED_ORIGINS),
   };
 }
 
-export async function startHttpServer(options: HttpServerOptions): Promise<RunningHttpServer> {
+export async function startHttpServer(
+  options: HttpServerOptions,
+): Promise<RunningHttpServer> {
   if (options.token.length < 32) {
     throw new Error("MCP bearer token must contain at least 32 characters");
   }
@@ -142,7 +156,10 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Runni
     }
 
     const path = requestPath(req);
-    if (path === "/healthz" && (req.method === "GET" || req.method === "HEAD")) {
+    if (
+      path === "/healthz" &&
+      (req.method === "GET" || req.method === "HEAD")
+    ) {
       if (req.method === "HEAD") {
         res.writeHead(200).end();
       } else {
@@ -172,7 +189,10 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Runni
     }
 
     Promise.resolve(nodeHandler(req, res)).catch((error: unknown) => {
-      console.error("proton-mcp HTTP request failed", error instanceof Error ? error.message : error);
+      console.error(
+        "proton-mcp HTTP request failed",
+        error instanceof Error ? error.message : error,
+      );
       if (!res.headersSent) {
         json(res, 500, { error: "internal_server_error" });
       } else if (!res.writableEnded) {

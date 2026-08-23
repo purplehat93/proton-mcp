@@ -56,7 +56,9 @@ describe("Streamable HTTP server", () => {
         },
       });
       expect(response.status).toBe(403);
-      await expect(response.json()).resolves.toEqual({ error: "forbidden_origin" });
+      await expect(response.json()).resolves.toEqual({
+        error: "forbidden_origin",
+      });
     });
   });
 
@@ -66,11 +68,14 @@ describe("Streamable HTTP server", () => {
         { name: "proton-mcp-test", version: "0.0.0" },
         { versionNegotiation: { mode: "auto" } },
       );
-      const transport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), {
-        requestInit: {
-          headers: { authorization: `Bearer ${TOKEN}` },
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`${baseUrl}/mcp`),
+        {
+          requestInit: {
+            headers: { authorization: `Bearer ${TOKEN}` },
+          },
         },
-      });
+      );
 
       try {
         await client.connect(transport);
@@ -89,7 +94,9 @@ describe("loadHttpServerOptions", () => {
     await writeFile(tokenFile, `${TOKEN}\n`, { mode: 0o600 });
 
     try {
-      const options = await loadHttpServerOptions({ MCP_AUTH_TOKEN_FILE: tokenFile });
+      const options = await loadHttpServerOptions({
+        MCP_AUTH_TOKEN_FILE: tokenFile,
+      });
       expect(options.host).toBe("0.0.0.0");
       expect(options.port).toBe(3000);
       expect(options.token).toBe(TOKEN);
