@@ -11,7 +11,8 @@ function success(output: Record<string, unknown>) {
 }
 
 function failure(error: unknown) {
-  const message = error instanceof Error ? error.message : "Mailbox operation failed";
+  const message =
+    error instanceof Error ? error.message : "Mailbox operation failed";
   return {
     isError: true,
     content: [{ type: "text" as const, text: message }],
@@ -42,7 +43,8 @@ export function createServer(): McpServer {
     "list_folders",
     {
       title: "List Proton Mail folders",
-      description: "List folders and labels visible through Proton Mail Bridge.",
+      description:
+        "List folders and labels visible through Proton Mail Bridge.",
       inputSchema: z.object({}),
       annotations: readOnlyAnnotations,
     },

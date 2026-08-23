@@ -102,7 +102,11 @@ function isLoopbackHost(host: string): boolean {
 
 function parseSecurity(value: string): ImapSecurity {
   const normalized = value.trim().toUpperCase();
-  if (normalized === "STARTTLS" || normalized === "SSL" || normalized === "NONE") {
+  if (
+    normalized === "STARTTLS" ||
+    normalized === "SSL" ||
+    normalized === "NONE"
+  ) {
     return normalized;
   }
   throw new Error(
@@ -113,7 +117,9 @@ function parseSecurity(value: string): ImapSecurity {
 function parsePort(value: string | undefined): number {
   const port = Number(value ?? DEFAULT_PORT);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(`Invalid BRIDGE_IMAP_PORT: ${value ?? String(DEFAULT_PORT)}`);
+    throw new Error(
+      `Invalid BRIDGE_IMAP_PORT: ${value ?? String(DEFAULT_PORT)}`,
+    );
   }
   return port;
 }
@@ -126,7 +132,10 @@ function parseDate(value: string, field: string): Date {
   return date;
 }
 
-function boundedLimit(value: number | undefined, fallback = DEFAULT_RESULT_LIMIT): number {
+function boundedLimit(
+  value: number | undefined,
+  fallback = DEFAULT_RESULT_LIMIT,
+): number {
   const limit = value ?? fallback;
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_RESULT_LIMIT) {
     throw new Error(`limit must be between 1 and ${MAX_RESULT_LIMIT}`);
@@ -263,7 +272,9 @@ function normalizeSpecialUse(value: string | undefined): string | null {
   return value.replace(/^\\/, "").toLowerCase();
 }
 
-function firstAddress(addresses: MessageAddressObject[] | undefined): AddressSummary {
+function firstAddress(
+  addresses: MessageAddressObject[] | undefined,
+): AddressSummary {
   const address = addresses?.[0];
   return {
     name: address?.name ?? null,
@@ -271,7 +282,9 @@ function firstAddress(addresses: MessageAddressObject[] | undefined): AddressSum
   };
 }
 
-function allAddresses(addresses: MessageAddressObject[] | undefined): AddressSummary[] {
+function allAddresses(
+  addresses: MessageAddressObject[] | undefined,
+): AddressSummary[] {
   return (addresses ?? []).map((address) => ({
     name: address.name ?? null,
     address: address.address ?? null,
@@ -366,7 +379,9 @@ function summarizeMessage(
   };
 }
 
-function buildSearchQuery(input: SearchMailInput | TopSendersInput): SearchObject {
+function buildSearchQuery(
+  input: SearchMailInput | TopSendersInput,
+): SearchObject {
   const query: SearchObject = {};
   if ("from" in input && input.from) query.from = input.from;
   if ("to" in input && input.to) query.to = input.to;
@@ -408,9 +423,7 @@ function selectable(flags: Set<string>): boolean {
   return !flags.has("\\Noselect");
 }
 
-async function streamToBuffer(
-  stream: NodeJS.ReadableStream,
-): Promise<Buffer> {
+async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const chunk of stream) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
@@ -551,7 +564,9 @@ export class ProtonMailbox {
         acquireTimeout: 10_000,
       });
       try {
-        const found = await client.search(buildSearchQuery(input), { uid: true });
+        const found = await client.search(buildSearchQuery(input), {
+          uid: true,
+        });
         const uids = Array.isArray(found) ? found : [];
         const attachmentFiltering = input.hasAttachments !== undefined;
         const scanLimit = attachmentFiltering ? MAX_SEARCH_SCAN : limit + 1;
@@ -565,8 +580,7 @@ export class ProtonMailbox {
               );
         return {
           messages: filtered.slice(0, limit),
-          truncated:
-            uids.length > candidates.length || filtered.length > limit,
+          truncated: uids.length > candidates.length || filtered.length > limit,
           scanned: candidates.length,
         };
       } finally {
@@ -594,7 +608,9 @@ export class ProtonMailbox {
         acquireTimeout: 10_000,
       });
       try {
-        const found = await client.search(buildSearchQuery(input), { uid: true });
+        const found = await client.search(buildSearchQuery(input), {
+          uid: true,
+        });
         const uids = Array.isArray(found) ? found : [];
         const candidates = uids.slice(-MAX_SENDER_SCAN);
         if (candidates.length === 0) {
@@ -608,7 +624,12 @@ export class ProtonMailbox {
         );
         const senders = new Map<
           string,
-          { name: string | null; address: string; count: number; latestAt: string | null }
+          {
+            name: string | null;
+            address: string;
+            count: number;
+            latestAt: string | null;
+          }
         >();
 
         for (const message of messages) {
@@ -635,7 +656,9 @@ export class ProtonMailbox {
 
         return {
           senders: [...senders.values()]
-            .sort((a, b) => b.count - a.count || a.address.localeCompare(b.address))
+            .sort(
+              (a, b) => b.count - a.count || a.address.localeCompare(b.address),
+            )
             .slice(0, limit),
           scanned: candidates.length,
           truncated: uids.length > candidates.length,
@@ -674,7 +697,9 @@ export class ProtonMailbox {
         const mailbox = client.mailbox;
         if (!mailbox) throw new Error("Mailbox was not opened");
         if (mailbox.uidValidity.toString() !== ref.uidValidity) {
-          throw new Error("Message id is stale because mailbox UIDVALIDITY changed");
+          throw new Error(
+            "Message id is stale because mailbox UIDVALIDITY changed",
+          );
         }
 
         const message = await client.fetchOne(
@@ -704,7 +729,8 @@ export class ProtonMailbox {
           receivedAt: messageDate(message),
           text,
           html: html?.text ?? null,
-          bodyTruncated: (plain?.truncated ?? false) || (html?.truncated ?? false),
+          bodyTruncated:
+            (plain?.truncated ?? false) || (html?.truncated ?? false),
           attachments: findAttachments(message.bodyStructure),
         };
       } finally {
