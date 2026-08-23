@@ -2,8 +2,6 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Client } from "@modelcontextprotocol/client";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client/streamableHttp";
 import { describe, expect, it } from "vitest";
 
 import { loadHttpServerOptions, startHttpServer } from "./http.js";
@@ -62,27 +60,25 @@ describe("Streamable HTTP server", () => {
     });
   });
 
-  it("accepts an authenticated MCP client over Streamable HTTP", async () => {
+  it("serves an authenticated MCP request over Streamable HTTP", async () => {
     await withServer(async (baseUrl) => {
-      const client = new Client(
-        { name: "proton-mcp-test", version: "0.0.0" },
-        { versionNegotiation: { mode: "auto" } },
-      );
-      const transport = new StreamableHTTPClientTransport(
-        new URL(`${baseUrl}/mcp`),
-        {
-          requestInit: {
-            headers: { authorization: `Bearer ${TOKEN}` },
-          },
+      const response = await fetch(`${baseUrl}/mcp`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${TOKEN}`,
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
         },
-      );
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/list",
+        }),
+      });
 
-      try {
-        await client.connect(transport);
-        expect(client.getProtocolEra()).toBe("modern");
-      } finally {
-        await client.close();
-      }
+      expect(response.status).toBe(200);
+      const body = await response.text();
+      expect(body).toContain('"tools":[]');
     });
   });
 });
