@@ -2,7 +2,6 @@ import { timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer as createNodeServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
 
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { createMcpHandler } from "@modelcontextprotocol/server";
@@ -217,7 +216,7 @@ export async function startHttpServer(
     throw new Error("Unable to determine MCP HTTP listen address");
   }
 
-  const { port } = address as AddressInfo;
+  const { port } = address;
   const displayHost = options.host === "0.0.0.0" ? "127.0.0.1" : options.host;
 
   return {
