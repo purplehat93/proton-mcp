@@ -1,4 +1,4 @@
-name: Refresh lockfile
+name: Refresh generated files
 
 on:
   push:
@@ -21,17 +21,22 @@ jobs:
         with:
           node-version: 20
 
-      - name: Refresh package-lock.json
-        run: npm install --package-lock-only --ignore-scripts
+      - name: Refresh lockfile and install dependencies
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          npm ci --ignore-scripts
 
-      - name: Commit lockfile if changed
+      - name: Format source
+        run: npm run format
+
+      - name: Commit generated changes
         shell: bash
         run: |
-          if git diff --quiet -- package-lock.json; then
+          if git diff --quiet -- package-lock.json src; then
             exit 0
           fi
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add package-lock.json
-          git commit -m "Update npm lockfile"
+          git add package-lock.json src
+          git commit -m "Format mailbox implementation"
           git push
