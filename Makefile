@@ -28,7 +28,8 @@ build:
 
 docker-check:
 	docker build -t proton-mcp:local .
-	docker run --rm --entrypoint sh proton-mcp:local -c 'test "$$(id -u)" != "0"'
-	docker run --rm --entrypoint node proton-mcp:local --input-type=module -e 'const m = await import("./dist/index.js"); if (typeof m.createServer !== "function") throw new Error("createServer export missing")'
+	@user="$$(docker image inspect proton-mcp:local --format '{{.Config.User}}')"; \
+	case "$$user" in ""|0|0:0|root|root:root) echo "Container is configured to run as root: $${user:-<empty>}" >&2; exit 1;; esac
+	docker run --rm proton-mcp:local --input-type=module -e 'const m = await import("./dist/index.js"); if (typeof m.createServer !== "function") throw new Error("createServer export missing")'
 
 smoke: docker-check
