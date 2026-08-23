@@ -23,7 +23,9 @@ function failure(error: unknown) {
   };
 }
 
-function withoutUndefined<T extends Record<string, unknown>>(input: T): Partial<T> {
+function withoutUndefined<T extends Record<string, unknown>>(
+  input: T,
+): Partial<T> {
   return Object.fromEntries(
     Object.entries(input).filter(([, value]) => value !== undefined),
   ) as Partial<T>;
