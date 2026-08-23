@@ -3,7 +3,7 @@ SHELL := /bin/bash
 .PHONY: install dev test lint typecheck format check build docker-check smoke
 
 install:
-	npm install
+	npm ci --ignore-scripts
 
 dev:
 	npm run dev
