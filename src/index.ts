@@ -16,5 +16,5 @@ export function createServer(): McpServer {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   console.error('proton-mcp starting on stdio');
-  serveStdio(() => createServer());
+  void serveStdio(() => createServer());
 }
