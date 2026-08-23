@@ -50,13 +50,18 @@ jobs:
 
       - name: Verify non-root runtime
         run: |
-          uid="$(docker run --rm --entrypoint sh proton-mcp:ci -c 'id -u')"
-          test "${uid}" != "0"
-          echo "Container default UID: ${uid}"
+          user="$(docker image inspect proton-mcp:ci --format '{{.Config.User}}')"
+          case "${user}" in
+            ""|0|0:0|root|root:root)
+              echo "Container is configured to run as root: ${user:-<empty>}" >&2
+              exit 1
+              ;;
+          esac
+          echo "Container default user: ${user}"
 
       - name: Smoke test compiled MCP module
         run: |
-          docker run --rm --entrypoint node proton-mcp:ci \
+          docker run --rm proton-mcp:ci \
             --input-type=module \
             -e 'const m = await import("./dist/index.js"); if (typeof m.createServer !== "function") throw new Error("createServer export missing"); console.error("MCP module smoke test passed")'
 
