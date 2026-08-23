@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim AS builder
+FROM node:24-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -11,7 +11,7 @@ RUN npm run build \
     && npm prune --omit=dev --ignore-scripts \
     && npm cache clean --force
 
-FROM node:20-bookworm-slim AS runtime
+FROM gcr.io/distroless/nodejs24-debian13:nonroot AS runtime
 
 ARG VERSION=0.0.0
 
@@ -24,10 +24,11 @@ LABEL org.opencontainers.image.title="Proton MCP" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}"
 
-COPY --from=builder --chown=node:node /app/package.json ./package.json
-COPY --from=builder --chown=node:node /app/node_modules ./node_modules
-COPY --from=builder --chown=node:node /app/dist ./dist
+COPY --from=builder --chown=65532:65532 /app/package.json ./package.json
+COPY --from=builder --chown=65532:65532 /app/node_modules ./node_modules
+COPY --from=builder --chown=65532:65532 /app/dist ./dist
 
-USER node
+USER 65532:65532
 
-ENTRYPOINT ["node", "dist/index.js"]
+# The distroless Node image provides the Node.js ENTRYPOINT.
+CMD ["dist/index.js"]
