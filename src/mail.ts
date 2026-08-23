@@ -460,24 +460,6 @@ async function downloadTextPart(
   };
 }
 
-function htmlToText(html: string): string {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<br\s*\/?\s*>/gi, "\n")
-    .replace(/<\/p\s*>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n\s+/g, "\n")
-    .trim();
-}
-
 export class ProtonMailbox {
   async listFolders(): Promise<{
     folders: Array<{
@@ -717,7 +699,7 @@ export class ProtonMailbox {
         const htmlPart = findBodyPart(message.bodyStructure, "text/html");
         const plain = await downloadTextPart(client, ref.uid, plainPart);
         const html = await downloadTextPart(client, ref.uid, htmlPart);
-        const text = plain?.text ?? (html ? htmlToText(html.text) : null);
+        const text = plain?.text ?? null;
 
         return {
           id,
