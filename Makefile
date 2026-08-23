@@ -28,8 +28,7 @@ build:
 
 docker-check:
 	docker build -t proton-mcp:local .
-	docker compose -f compose.example.yaml config >/dev/null
+	docker run --rm --entrypoint sh proton-mcp:local -c 'test "$$(id -u)" != "0"'
+	docker run --rm --entrypoint node proton-mcp:local --input-type=module -e 'const m = await import("./dist/index.js"); if (typeof m.createServer !== "function") throw new Error("createServer export missing")'
 
-smoke:
-	@echo "Smoke test not implemented yet; must remain read-only for v0.1." >&2
-	@exit 2
+smoke: docker-check
