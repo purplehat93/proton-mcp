@@ -12,7 +12,7 @@ async function run(): Promise<void> {
 
   if (mode === "stdio") {
     console.error("proton-mcp starting on stdio");
-    await serveStdio(() => createServer());
+    serveStdio(() => createServer());
     return;
   }
 
