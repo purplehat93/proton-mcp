@@ -28,8 +28,8 @@ build:
 
 docker-check:
 	docker build -t proton-mcp:local .
-	docker compose -f compose.example.yaml config >/dev/null
+	@user="$$(docker image inspect proton-mcp:local --format '{{.Config.User}}')"; \
+	case "$$user" in ""|0|0:0|root|root:root) echo "Container is configured to run as root: $${user:-<empty>}" >&2; exit 1;; esac
+	docker run --rm proton-mcp:local --input-type=module -e 'const m = await import("./dist/index.js"); if (typeof m.createServer !== "function") throw new Error("createServer export missing")'
 
-smoke:
-	@echo "Smoke test not implemented yet; must remain read-only for v0.1." >&2
-	@exit 2
+smoke: docker-check
