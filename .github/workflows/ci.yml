@@ -23,5 +23,14 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Validate
-        run: make check
+      - name: Format check
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
