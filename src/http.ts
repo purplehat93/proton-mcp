@@ -4,6 +4,7 @@ import { createServer as createNodeServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { toNodeHandler } from "@modelcontextprotocol/node";
+import type { NodeIncomingMessageLike } from "@modelcontextprotocol/node";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 
 import { createServer as createMcpServer } from "./mcp.js";
@@ -97,6 +98,15 @@ function requestPath(req: IncomingMessage): string {
   }
 }
 
+function toMcpRequest(req: IncomingMessage): NodeIncomingMessageLike {
+  return {
+    headers: req.headers,
+    ...(req.method === undefined ? {} : { method: req.method }),
+    ...(req.url === undefined ? {} : { url: req.url }),
+    [Symbol.asyncIterator]: () => req[Symbol.asyncIterator](),
+  };
+}
+
 function json(
   res: ServerResponse,
   status: number,
@@ -187,17 +197,19 @@ export async function startHttpServer(
       return;
     }
 
-    Promise.resolve(nodeHandler(req, res)).catch((error: unknown) => {
-      console.error(
-        "proton-mcp HTTP request failed",
-        error instanceof Error ? error.message : error,
-      );
-      if (!res.headersSent) {
-        json(res, 500, { error: "internal_server_error" });
-      } else if (!res.writableEnded) {
-        res.end();
-      }
-    });
+    Promise.resolve(nodeHandler(toMcpRequest(req), res)).catch(
+      (error: unknown) => {
+        console.error(
+          "proton-mcp HTTP request failed",
+          error instanceof Error ? error.message : error,
+        );
+        if (!res.headersSent) {
+          json(res, 500, { error: "internal_server_error" });
+        } else if (!res.writableEnded) {
+          res.end();
+        }
+      },
+    );
   });
 
   await new Promise<void>((resolve, reject) => {
