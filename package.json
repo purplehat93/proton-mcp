@@ -12,9 +12,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "lint": "eslint .",
-    "format:check": "prettier --check .",
-    "format": "prettier --write .",
+    "lint": "eslint src",
+    "format:check": "prettier --check \"src/**/*.ts\" \"*.{js,json}\"",
+    "format": "prettier --write \"src/**/*.ts\" \"*.{js,json}\"",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm test"
   },
   "dependencies": {
@@ -29,6 +29,6 @@
     "tsx": "^4.0.0",
     "typescript": "^6.0.0",
     "typescript-eslint": "^8.0.0",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.11"
   }
 }
