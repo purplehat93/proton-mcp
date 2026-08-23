@@ -1,0 +1,20 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+
+# Runtime secrets / Proton Bridge state
+secrets/
+bridge-data/
+bridge/
+runtime/
+*.pem
+*.key
+*.gpg
+*.enc
+.password-store/
+.gnupg/
