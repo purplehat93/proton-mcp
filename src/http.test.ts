@@ -60,7 +60,7 @@ describe("Streamable HTTP server", () => {
     });
   });
 
-  it("serves an authenticated MCP request over Streamable HTTP", async () => {
+  it("serves an authenticated MCP initialize request over HTTP", async () => {
     await withServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/mcp`, {
         method: "POST",
@@ -72,13 +72,19 @@ describe("Streamable HTTP server", () => {
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: 1,
-          method: "tools/list",
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: "proton-mcp-test", version: "0.0.0" },
+          },
         }),
       });
 
       expect(response.status).toBe(200);
       const body = await response.text();
-      expect(body).toContain('"tools":[]');
+      expect(body).toContain('"serverInfo"');
+      expect(body).toContain('"name":"proton-mcp"');
     });
   });
 });
