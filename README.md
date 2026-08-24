@@ -13,7 +13,7 @@ A self-hosted Model Context Protocol (MCP) server for Proton Mail, designed to r
 - Make mailbox cleanup efficient by returning metadata first and full message bodies only on demand.
 - Keep mutations explicit, bounded, reviewable, and reversible where IMAP can prove an exact reversal.
 
-## v0.1 tools
+## Mailbox tools
 
 - `list_folders`
 - `mailbox_stats`
@@ -44,6 +44,8 @@ than changing mail directly.
 
 Disabled rules can be changed with `update_automation_rule` or removed with
 `delete_automation_rule`, which also cancels any unused plan from that rule.
+The proposed `set_automation_rule_schedule` feature is documented in the
+roadmap; it is not deployed until its review is merged.
 
 See [`docs/SPEC.md`](docs/SPEC.md) for the tool contract and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the deployment model.
 
@@ -110,7 +112,7 @@ The Bridge image itself is maintained in [`purplehat93/proton-bridge-docker`](ht
 
 - No Proton account password in the repository, image, logs, or normal environment variables.
 - No arbitrary shell MCP tool.
-- No destructive MCP tools in `v0.1`.
+- No permanent-delete MCP tool.
 - Prefer deterministic mailbox processing to sending large volumes of email content to an LLM.
 - Keep validation simple: future agents should be able to run one command (`make check`) before finishing work.
 - A source change in this repository is not permission to deploy or restart the live NAS stack.
@@ -123,6 +125,7 @@ The Bridge image itself is maintained in [`purplehat93/proton-bridge-docker`](ht
 - [`docs/SPEC.md`](docs/SPEC.md) — MCP tool contract.
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — local development workflow.
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — Synology / Docker operations.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — implemented work and pending ideas.
 
 ## License
 

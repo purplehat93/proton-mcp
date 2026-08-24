@@ -43,7 +43,9 @@ mise exec -- npm run check
 
 `make docker-check` should build the production image and validate the example Compose file without requiring real credentials.
 
-`make smoke` is reserved for a configured environment with a real Proton Bridge. It must remain read-only during `v0.1`.
+`make smoke` is reserved for a configured environment with a real Proton Bridge.
+It must remain read-only unless a separately approved live mutation/undo test is
+being performed.
 
 ## Agent workflow
 
@@ -78,7 +80,7 @@ This separation lets CI exercise tool validation and result shaping without need
 
 ## Real Bridge smoke testing
 
-Once Bridge is configured, smoke tests may verify only non-destructive operations such as:
+Once Bridge is configured, normal smoke tests verify non-destructive operations such as:
 
 1. connect/authenticate to local Bridge IMAP;
 2. list folders;
@@ -86,7 +88,8 @@ Once Bridge is configured, smoke tests may verify only non-destructive operation
 4. perform a deliberately bounded search;
 5. disconnect cleanly.
 
-The smoke command must not mark messages read, move messages, delete messages, or send mail in `v0.1`.
+Normal smoke commands must not mark messages read, move messages, delete
+messages, or send mail.
 
 ## Logging
 

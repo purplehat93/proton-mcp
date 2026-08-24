@@ -10,6 +10,8 @@ concurrency:
   group: container-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions: {}
+
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/proton-mcp
 
@@ -219,3 +221,23 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           sbom-path: validated/sbom.spdx.json
           push-to-registry: true
+
+  notify:
+    name: notify
+    if: always()
+    needs: [build-scan, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+    steps:
+      - name: Notify Discord
+        if: env.DISCORD_WEBHOOK_URL != '' && (needs.build-scan.result == 'failure' || needs.publish.result == 'failure' || needs.publish.result == 'success')
+        env:
+          MESSAGE: "${{ needs.publish.result == 'success' && 'Container published' || 'Container workflow failed' }} for ${{ github.repository }} on ${{ github.ref_name }}\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          set -euo pipefail
+          jq -n --arg content "$MESSAGE" '{content: $content}' |
+            curl --fail-with-body --silent --show-error \
+              -H 'Content-Type: application/json' \
+              --data-binary @- "$DISCORD_WEBHOOK_URL"

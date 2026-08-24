@@ -10,7 +10,6 @@ Security decisions in this project are architectural constraints, not optional d
 - Do not publish Bridge IMAP/SMTP ports to the host LAN or internet.
 - Do not expose an unauthenticated MCP endpoint outside a trusted local environment.
 - Do not add arbitrary shell or arbitrary IMAP execution tools.
-- `v0.1` contains no mailbox mutation tools.
 - Permanent delete is not an initial feature.
 
 ## Secrets
@@ -57,6 +56,11 @@ Automation rules are metadata-only, disabled by default, and have no scheduler
 or background worker. Each manual evaluation is bounded to 50 messages and must
 create a separate one-time cleanup plan before a mail mutation can occur. Rules
 cannot use full-body text matching or permanent deletion.
+
+Any future scheduler must be evaluation-only: it may record bounded opaque ids
+for review but must never create a usable confirmation token or mutate mail in
+the background. Outbound notification integrations must use scoped secrets and
+must not include message bodies, full subjects, or addresses by default.
 
 ## Reporting vulnerabilities
 

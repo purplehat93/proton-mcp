@@ -8,6 +8,7 @@ import type { NodeIncomingMessageLike } from "@modelcontextprotocol/node";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 
 import { createServer as createMcpServer } from "./mcp.js";
+import { startAutomationScheduler } from "./scheduler.js";
 
 const DEFAULT_HOST = "0.0.0.0";
 const DEFAULT_PORT = 3000;
@@ -156,6 +157,7 @@ export async function startHttpServer(
   }
 
   const handler = createMcpHandler(createMcpServer);
+  const stopScheduler = startAutomationScheduler();
   const nodeHandler = toNodeHandler(handler);
 
   const server = createNodeServer((req, res) => {
@@ -236,6 +238,7 @@ export async function startHttpServer(
     port,
     url: `http://${displayHost}:${port}/mcp`,
     close: async () => {
+      stopScheduler();
       await handler.close();
       await new Promise<void>((resolve, reject) => {
         server.close((error) => {

@@ -39,3 +39,23 @@ jobs:
 
       - name: Test
         run: npm test
+
+  notify:
+    name: notify
+    if: always()
+    needs: [check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+    steps:
+      - name: Notify Discord on failure
+        if: env.DISCORD_WEBHOOK_URL != '' && needs.check.result == 'failure'
+        env:
+          MESSAGE: "GitHub CI failed for ${{ github.repository }} on ${{ github.ref_name }}\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          set -euo pipefail
+          jq -n --arg content "$MESSAGE" '{content: $content}' |
+            curl --fail-with-body --silent --show-error \
+              -H 'Content-Type: application/json' \
+              --data-binary @- "$DISCORD_WEBHOOK_URL"
