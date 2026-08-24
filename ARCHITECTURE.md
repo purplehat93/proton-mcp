@@ -92,6 +92,9 @@ This metadata-first design reduces latency, model context usage, and accidental 
 - `list_folders`
 - `mailbox_stats`
 - `top_senders`
+- `mailbox_inventory`
+- `cleanup_candidates`
+- `mailbox_analysis`
 - `search_mail`
 - `get_message`
 
@@ -102,8 +105,14 @@ Candidate tools:
 - `mark_read`
 - `mark_unread`
 - `archive_messages`
+- `copy_messages`
 - `move_messages`
 - `trash_messages`
+
+Write tools use opaque ids returned by read-only search tools, enforce a maximum
+batch size, validate mailbox UIDVALIDITY, and support dry-run requests. Archive,
+move, copy, and trash operate through Bridge's IMAP folder model; permanent
+deletion is not exposed.
 
 Write tools must operate on explicit message identifiers or a previously reviewed bounded selection. Permanent deletion remains out of scope initially.
 

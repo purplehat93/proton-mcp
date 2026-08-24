@@ -30,5 +30,7 @@ COPY --from=builder --chown=65532:65532 /app/dist ./dist
 
 USER 65532:65532
 
+EXPOSE 3000
+
 # The distroless Node image provides the Node.js ENTRYPOINT.
-CMD ["dist/index.js"]
+CMD ["dist/index.js", "serve"]
