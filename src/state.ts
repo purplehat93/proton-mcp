@@ -51,7 +51,12 @@ export type AutomationRun = {
   createdAt: string;
   candidateCount: number;
   planId?: string;
-  status: "no_matches" | "pending_confirmation" | "applied" | "needs_review";
+  status:
+    | "no_matches"
+    | "pending_confirmation"
+    | "applied"
+    | "needs_review"
+    | "cancelled";
 };
 
 export type CleanupOperation = {
@@ -202,6 +207,54 @@ export class CleanupStateStore {
       rule.updatedAt = new Date().toISOString();
     });
     return rule!;
+  }
+
+  async updateRule(
+    id: string,
+    input: Pick<AutomationRule, "name" | "action" | "match"> & {
+      destination?: string;
+    },
+  ): Promise<AutomationRule> {
+    let rule: AutomationRule | undefined;
+    await this.mutate((state) => {
+      rule = state.rules.find((item) => item.id === id);
+      if (!rule) throw new Error("Automation rule not found");
+      if (rule.enabled)
+        throw new Error("Disable the automation rule before updating it");
+      rule.name = input.name;
+      rule.action = input.action;
+      if (input.destination) rule.destination = input.destination;
+      else delete rule.destination;
+      rule.match = input.match;
+      rule.updatedAt = new Date().toISOString();
+    });
+    return rule!;
+  }
+
+  async deleteRule(id: string): Promise<{ cancelledPlans: number }> {
+    let cancelledPlans = 0;
+    await this.mutate((state) => {
+      const rule = state.rules.find((item) => item.id === id);
+      if (!rule) throw new Error("Automation rule not found");
+      if (rule.enabled)
+        throw new Error("Disable the automation rule before deleting it");
+      const runIds = new Set(
+        state.ruleRuns.filter((run) => run.ruleId === id).map((run) => run.id),
+      );
+      const plans = state.plans.filter(
+        (plan) => plan.ruleRunId && runIds.has(plan.ruleRunId),
+      );
+      cancelledPlans = plans.filter((plan) => plan.status === "pending").length;
+      const planIds = new Set(plans.map((plan) => plan.id));
+      state.plans = state.plans.filter((plan) => !planIds.has(plan.id));
+      for (const run of state.ruleRuns) {
+        if (runIds.has(run.id) && run.status === "pending_confirmation") {
+          run.status = "cancelled";
+        }
+      }
+      state.rules = state.rules.filter((item) => item.id !== id);
+    });
+    return { cancelledPlans };
   }
 
   async getRule(id: string): Promise<AutomationRule> {

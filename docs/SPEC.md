@@ -306,6 +306,10 @@ returns no-match, pending-confirmation, applied, and needs-review run records.
 There is no schedule, background execution, full-body matching, or permanent
 deletion.
 
+`update_automation_rule` replaces a disabled rule. `delete_automation_rule`
+requires a disabled rule, cancels any unused confirmation plan it created, and
+keeps its run history as a cancelled audit record.
+
 `mark_read`, `mark_unread`, `archive_messages`, and `trash_messages` accept:
 
 ```json
