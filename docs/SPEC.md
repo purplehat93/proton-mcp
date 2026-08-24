@@ -246,6 +246,14 @@ The result includes `matched`, `scanned`, `truncated`, the effective criteria,
 and message summaries with `reasons`. It is intentionally not a delete or
 archive command.
 
+## `mailbox_analysis`
+
+Performs a bounded metadata-only analysis of attachment types and sizes,
+duplicate candidates, subject-based thread groups, and newsletter indicators
+from `List-ID`, `List-Unsubscribe`, or bulk-precedence headers. Duplicate and
+thread results are heuristics and require review. Message bodies and attachment
+contents are never fetched.
+
 ## Controlled write tools
 
 The controlled write tools accept `ids` from a previous search result and an

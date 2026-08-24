@@ -20,6 +20,7 @@ const MAX_SENDER_SCAN = 5000;
 const MAX_INVENTORY_SCAN = 5000;
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_MUTATION_BATCH = 50;
+const MAX_ANALYSIS_SCAN = 500;
 
 export type ImapSecurity = "STARTTLS" | "SSL" | "NONE";
 
@@ -76,6 +77,10 @@ export type CleanupCandidatesInput = SearchMailInput & {
   olderThanDays?: number;
   minSenderCount?: number;
   includeUnread?: boolean;
+  scanLimit?: number;
+};
+
+export type MailboxAnalysisInput = SearchMailInput & {
   scanLimit?: number;
 };
 
@@ -202,6 +207,20 @@ function parseSenderThreshold(value: number | undefined): number {
     throw new Error("minSenderCount must be between 2 and 5000");
   }
   return threshold;
+}
+
+function normalizeSubject(subject: string | null): string {
+  return (subject ?? "")
+    .replace(/^(re|fw|fwd):\s*/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function headerValue(headers: Buffer | undefined, name: string): string | null {
+  if (!headers) return null;
+  const pattern = new RegExp(`^${name}:\\s*(.+)$`, "im");
+  return headers.toString("utf8").match(pattern)?.[1]?.trim() ?? null;
 }
 
 export async function loadImapConfig(
@@ -1045,6 +1064,167 @@ export class ProtonMailbox {
             includeUnread,
           },
           candidates: results,
+        };
+      } finally {
+        lock.release();
+      }
+    });
+  }
+
+  async mailboxAnalysis(input: MailboxAnalysisInput): Promise<{
+    scope: string;
+    scanned: number;
+    truncated: boolean;
+    attachments: Array<{
+      contentType: string;
+      count: number;
+      totalBytes: number;
+      examples: string[];
+    }>;
+    duplicateGroups: Array<{
+      fingerprint: string;
+      count: number;
+      ids: string[];
+    }>;
+    threadGroups: Array<{ subject: string; count: number; ids: string[] }>;
+    newsletterCandidates: Array<{
+      id: string;
+      sender: AddressSummary;
+      subject: string | null;
+      listId: string | null;
+      listUnsubscribe: string | null;
+      reason: string;
+    }>;
+  }> {
+    const folder = input.folder ?? "INBOX";
+    const scanLimit = input.limit
+      ? Math.min(input.limit, MAX_ANALYSIS_SCAN)
+      : MAX_ANALYSIS_SCAN;
+    return withClient(async (client) => {
+      const lock = await client.getMailboxLock(folder, {
+        readOnly: true,
+        acquireTimeout: 10_000,
+      });
+      try {
+        const found = await client.search(buildSearchQuery(input), {
+          uid: true,
+        });
+        const uids = Array.isArray(found) ? found : [];
+        const candidates = uids.slice(-scanLimit);
+        const mailbox = client.mailbox;
+        if (!mailbox) throw new Error("Mailbox was not opened");
+        const messages = candidates.length
+          ? await client.fetchAll(
+              candidates,
+              {
+                envelope: true,
+                internalDate: true,
+                size: true,
+                bodyStructure: true,
+                headers: ["list-id", "list-unsubscribe", "precedence"],
+              },
+              { uid: true },
+            )
+          : [];
+        const attachments = new Map<
+          string,
+          { count: number; totalBytes: number; examples: Set<string> }
+        >();
+        const duplicates = new Map<string, string[]>();
+        const threads = new Map<string, { subject: string; ids: string[] }>();
+        const newsletters: Array<{
+          id: string;
+          sender: AddressSummary;
+          subject: string | null;
+          listId: string | null;
+          listUnsubscribe: string | null;
+          reason: string;
+        }> = [];
+
+        for (const message of messages) {
+          const summary = summarizeMessage(
+            folder,
+            mailbox.uidValidity,
+            message,
+          );
+          for (const attachment of findAttachments(message.bodyStructure)) {
+            const current = attachments.get(attachment.contentType) ?? {
+              count: 0,
+              totalBytes: 0,
+              examples: new Set<string>(),
+            };
+            current.count += 1;
+            current.totalBytes += attachment.size;
+            if (attachment.filename && current.examples.size < 5) {
+              current.examples.add(attachment.filename);
+            }
+            attachments.set(attachment.contentType, current);
+          }
+
+          const sender = summary.from.address?.toLowerCase() ?? "";
+          const fingerprint = `${sender}|${normalizeSubject(summary.subject)}|${summary.size}`;
+          duplicates.set(fingerprint, [
+            ...(duplicates.get(fingerprint) ?? []),
+            summary.id,
+          ]);
+          const threadSubject = normalizeSubject(summary.subject);
+          if (threadSubject) {
+            const thread = threads.get(threadSubject) ?? {
+              subject: summary.subject ?? "",
+              ids: [],
+            };
+            thread.ids.push(summary.id);
+            threads.set(threadSubject, thread);
+          }
+
+          const listId = headerValue(message.headers, "list-id");
+          const listUnsubscribe = headerValue(
+            message.headers,
+            "list-unsubscribe",
+          );
+          const precedence = headerValue(message.headers, "precedence");
+          if (
+            listId ||
+            listUnsubscribe ||
+            /^(bulk|list|junk)$/i.test(precedence ?? "")
+          ) {
+            newsletters.push({
+              id: summary.id,
+              sender: summary.from,
+              subject: summary.subject,
+              listId,
+              listUnsubscribe,
+              reason: listUnsubscribe
+                ? "list-unsubscribe-header"
+                : listId
+                  ? "list-id-header"
+                  : "bulk-precedence",
+            });
+          }
+        }
+
+        return {
+          scope: folder,
+          scanned: messages.length,
+          truncated: uids.length > candidates.length,
+          attachments: [...attachments.entries()]
+            .map(([contentType, value]) => ({
+              ...value,
+              contentType,
+              examples: [...value.examples],
+            }))
+            .sort((a, b) => b.totalBytes - a.totalBytes),
+          duplicateGroups: [...duplicates.entries()]
+            .filter(([, ids]) => ids.length > 1)
+            .map(([fingerprint, ids]) => ({
+              fingerprint,
+              count: ids.length,
+              ids,
+            })),
+          threadGroups: [...threads.values()]
+            .filter((thread) => thread.ids.length > 1)
+            .map((thread) => ({ ...thread, count: thread.ids.length })),
+          newsletterCandidates: newsletters,
         };
       } finally {
         lock.release();
