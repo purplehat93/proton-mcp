@@ -8,6 +8,18 @@ Keep this file short. Read the linked docs before changing architecture or behav
 2. Read `docs/SPEC.md` for tool contracts.
 3. Read `SECURITY.md` before touching networking, credentials, Bridge integration, or write actions.
 4. Read `docs/DEVELOPMENT.md` for validation commands.
+5. If the deployment repository `nmousouros/nas-infrastructure` is available in the same workspace, read its `STATE.md` and `stacks/proton-mail/AGENTS.md` for the current live deployment state. Do not copy changing runtime facts into this repository.
+
+## Repository boundary
+
+This repository owns the MCP server implementation and its contracts. It does not own the live Synology deployment state or Proton Bridge image build.
+
+Related repositories:
+
+- `purplehat93/proton-bridge-docker` — headless Proton Mail Bridge image.
+- `nmousouros/nas-infrastructure` — live Compose deployment and current runtime handoff.
+
+When a task spans repositories, inspect the relevant source rather than inferring behavior from deployment documentation.
 
 ## Rules
 
@@ -19,6 +31,7 @@ Keep this file short. Read the linked docs before changing architecture or behav
 - Metadata-first: do not fetch or return full message bodies unless the caller explicitly requests a message.
 - Preserve existing tool schemas unless the task explicitly changes the contract.
 - Do not redesign the two-container architecture without an explicit request.
+- Runtime/deployment changes are not implied by source changes; do not assume permission to restart or modify the live NAS.
 
 ## Validation
 
