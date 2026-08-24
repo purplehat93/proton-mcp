@@ -4,7 +4,7 @@ This document defines the public MCP contract for the first release. Implementat
 
 ## General rules
 
-- `v0.1` is read-only.
+- The service has bounded read-only tools and controlled explicit-id write tools.
 - All list/search results are bounded.
 - Bulk operations return metadata, not full message bodies.
 - Message identifiers returned by this service are opaque to MCP clients.
@@ -253,6 +253,12 @@ The result includes `matched`, `scanned`, `truncated`, the effective criteria,
 and message summaries with `reasons`. It is intentionally not a delete or
 archive command.
 
+## `receipt_candidates`
+
+Scans at most 500 recent messages in one folder using envelopes only and returns
+subject-line receipt signals. It does not fetch message bodies. Callers should
+use `extract_receipt` on explicit candidates to inspect bounded content.
+
 ## `mailbox_analysis`
 
 Performs a bounded metadata-only analysis of attachment types and sizes,
@@ -267,6 +273,24 @@ The controlled write tools accept `ids` from a previous search result and an
 optional `dryRun` flag. `ids` must contain 1-50 unique opaque ids from one
 source folder. The service validates mailbox UIDVALIDITY and confirms that all
 selected messages still exist before changing mail.
+
+## Cleanup workflow tools
+
+`create_cleanup_plan` accepts an action and 1-50 explicit opaque ids from one
+folder. Move and copy plans require a destination. It returns an immutable plan
+id plus a one-time confirmation token; the server stores only the token hash.
+Plans expire after 15 minutes.
+
+`apply_cleanup_plan` requires the plan id and confirmation token. It claims the
+plan before executing it, so a plan cannot be applied twice. If the process
+cannot determine the outcome after a claim, the plan is marked `needs_review`
+and is not retried automatically.
+
+`cleanup_history` returns compact completed-operation metadata. For archive,
+trash, and move operations, the service records destination opaque ids only
+when Bridge supplies a complete UIDPLUS mapping. `undo_cleanup_operation` moves
+only those exact destination ids back to their recorded source folder. Copy,
+flag changes, and unmapped moves are intentionally not undoable.
 
 `mark_read`, `mark_unread`, `archive_messages`, and `trash_messages` accept:
 

@@ -20,12 +20,14 @@ Example host layout:
 /volume2/docker/appdata/proton-mail/
 └── bridge/
     └── persistent state
+└── mcp/
+    └── cleanup workflow state
 
 /volume2/docker/secrets/proton-mail/
 └── mcp_auth_token
 ```
 
-Do not commit the live secret file, Bridge state, password store, GPG keyring, or generated Bridge credentials.
+Do not commit the live secret file, Bridge state, MCP workflow state, password store, GPG keyring, or generated Bridge credentials.
 
 ## Services
 
@@ -120,7 +122,7 @@ ghcr.io/purplehat93/proton-mcp:v0.1.0
 
 ## Backups
 
-Back up only the persistent runtime material needed to restore Bridge operation, and treat those backups as sensitive secrets. Back up the MCP bearer token only through an appropriately protected secrets-backup process. Do not include mailbox exports or Bridge state in normal source-control backups.
+Back up only the persistent runtime material needed to restore Bridge operation and cleanup history, and treat those backups as sensitive secrets. Back up the MCP bearer token only through an appropriately protected secrets-backup process. Do not include mailbox exports, Bridge state, or MCP workflow state in normal source-control backups.
 
 ## Troubleshooting order
 

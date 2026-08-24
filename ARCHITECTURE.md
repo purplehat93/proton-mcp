@@ -87,7 +87,7 @@ This metadata-first design reduces latency, model context usage, and accidental 
 
 ## Version roadmap
 
-### v0.1 — read-only
+### Implemented read-only tools
 
 - `list_folders`
 - `mailbox_stats`
@@ -97,10 +97,10 @@ This metadata-first design reduces latency, model context usage, and accidental 
 - `mailbox_analysis`
 - `search_mail`
 - `get_message`
+- `extract_receipt`
+- `receipt_candidates`
 
-### v0.2 — controlled writes
-
-Candidate tools:
+### Implemented controlled writes
 
 - `mark_read`
 - `mark_unread`
@@ -115,6 +115,20 @@ move, copy, and trash operate through Bridge's IMAP folder model; permanent
 deletion is not exposed.
 
 Write tools must operate on explicit message identifiers or a previously reviewed bounded selection. Permanent deletion remains out of scope initially.
+
+### Cleanup workflow state
+
+`create_cleanup_plan` persists an immutable, 15-minute plan containing explicit
+opaque ids and a hash of a one-time confirmation token. `apply_cleanup_plan`
+claims the plan before changing mail. A process interruption after a claim is
+marked for review rather than retried automatically, because the remote IMAP
+outcome may be unknown.
+
+Completed plans create a compact operation record. For move-like operations,
+the record contains destination opaque ids only when Bridge reports a complete
+UIDPLUS source-to-destination mapping. Only those records can be undone through
+`undo_cleanup_operation`; copies and operations without a complete mapping are
+not presented as reversible.
 
 ## Non-goals
 
