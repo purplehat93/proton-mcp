@@ -29,6 +29,8 @@ export type AutomationRule = {
   id: string;
   name: string;
   enabled: boolean;
+  scheduleMinutes?: number;
+  lastScheduledAt?: string;
   action: AutomationAction;
   destination?: string;
   match: {
@@ -50,13 +52,15 @@ export type AutomationRun = {
   ruleId: string;
   createdAt: string;
   candidateCount: number;
+  ids?: string[];
   planId?: string;
   status:
     | "no_matches"
     | "pending_confirmation"
     | "applied"
     | "needs_review"
-    | "cancelled";
+    | "cancelled"
+    | "pending_review";
 };
 
 export type CleanupOperation = {
@@ -198,12 +202,69 @@ export class CleanupStateStore {
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  async listDueRules(now = new Date()): Promise<AutomationRule[]> {
+    return (await this.read()).rules.filter((rule) => {
+      if (!rule.enabled || !rule.scheduleMinutes) return false;
+      if (!rule.lastScheduledAt) return true;
+      return (
+        now.getTime() - new Date(rule.lastScheduledAt).getTime() >=
+        rule.scheduleMinutes * 60_000
+      );
+    });
+  }
+
+  async recordScheduledRun(
+    ruleId: string,
+    ids: string[],
+  ): Promise<AutomationRun> {
+    let run!: AutomationRun;
+    await this.mutate((state) => {
+      const rule = state.rules.find((item) => item.id === ruleId);
+      if (!rule || !rule.enabled || !rule.scheduleMinutes)
+        throw new Error("Automation rule is not scheduled");
+      const now = new Date().toISOString();
+      rule.lastScheduledAt = now;
+      run = {
+        id: randomUUID(),
+        ruleId,
+        createdAt: now,
+        candidateCount: ids.length,
+        ...(ids.length ? { ids } : {}),
+        status: ids.length ? "pending_review" : "no_matches",
+      };
+      state.ruleRuns.push(run);
+    });
+    return run;
+  }
+
   async setRuleEnabled(id: string, enabled: boolean): Promise<AutomationRule> {
     let rule: AutomationRule | undefined;
     await this.mutate((state) => {
       rule = state.rules.find((item) => item.id === id);
       if (!rule) throw new Error("Automation rule not found");
       rule.enabled = enabled;
+      rule.updatedAt = new Date().toISOString();
+    });
+    return rule!;
+  }
+
+  async setRuleSchedule(
+    id: string,
+    scheduleMinutes?: number,
+  ): Promise<AutomationRule> {
+    let rule: AutomationRule | undefined;
+    await this.mutate((state) => {
+      rule = state.rules.find((item) => item.id === id);
+      if (!rule) throw new Error("Automation rule not found");
+      if (rule.enabled)
+        throw new Error(
+          "Disable the automation rule before changing its schedule",
+        );
+      if (scheduleMinutes) rule.scheduleMinutes = scheduleMinutes;
+      else {
+        delete rule.scheduleMinutes;
+        delete rule.lastScheduledAt;
+      }
       rule.updatedAt = new Date().toISOString();
     });
     return rule!;

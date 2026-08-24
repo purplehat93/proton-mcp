@@ -46,7 +46,8 @@ Responsibilities:
 - Expose narrowly scoped MCP tools.
 - Validate all tool inputs.
 - Bound output size and avoid bulk body retrieval.
-- Eventually perform explicitly requested safe mailbox mutations.
+- Perform explicitly requested, bounded mailbox mutations through reviewable
+  cleanup plans.
 
 It never needs the user's real Proton account password.
 
@@ -137,6 +138,13 @@ They match bounded mailbox metadata and are disabled by default. A rule has no
 background scheduler: `prepare_automation_run` evaluates it manually and creates
 the existing confirmation plan from the exact current message ids. Rule-run
 history records no-match, pending-confirmation, applied, and needs-review states.
+
+### Proposed scheduled review runs
+
+The next release may add interval-based rule evaluation in the HTTP service.
+Scheduled runs must only record bounded `pending_review` candidates; they must
+not create confirmation tokens or change mail. A separate explicit client action
+will remain necessary to prepare and apply a cleanup plan.
 
 ## Non-goals
 

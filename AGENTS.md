@@ -23,7 +23,9 @@ When a task spans repositories, inspect the relevant source rather than inferrin
 
 ## Rules
 
-- `v0.1` is read-only. Do not add mailbox mutations unless explicitly requested.
+- Controlled mailbox mutations require explicit user approval, bounded opaque ids,
+  and the review/confirmation workflow. Do not add unattended mutation paths
+  without an explicit safety design.
 - Never expose Proton Mail Bridge IMAP/SMTP ports to the LAN or internet.
 - Never commit Proton credentials, Bridge-generated credentials, tokens, keyrings, vault files, or mailbox data.
 - Never add a generic shell/command-execution MCP tool.

@@ -1,4 +1,4 @@
-# v0.1 Tool Specification
+# Tool Specification
 
 This document defines the public MCP contract for the first release. Implementation changes must preserve these semantics unless the spec is explicitly changed first.
 
@@ -309,6 +309,11 @@ deletion.
 `update_automation_rule` replaces a disabled rule. `delete_automation_rule`
 requires a disabled rule, cancels any unused confirmation plan it created, and
 keeps its run history as a cancelled audit record.
+
+`set_automation_rule_schedule` sets a 15-minute to 7-day interval on a disabled
+rule. The HTTP service evaluates due enabled rules once per minute and records
+at most 50 opaque ids as a `pending_review` run. Scheduled execution never
+creates a confirmation token, applies a plan, or changes mail.
 
 `mark_read`, `mark_unread`, `archive_messages`, and `trash_messages` accept:
 

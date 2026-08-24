@@ -98,6 +98,7 @@ const automationRuleSchema = z.object({
   name: z.string().min(1).max(120),
   action: z.enum(["read", "unread", "archive", "trash", "move"]),
   destination: z.string().min(1).optional(),
+  scheduleMinutes: z.number().int().min(15).max(10080).optional(),
   match: automationMatchSchema,
 });
 
@@ -373,7 +374,7 @@ export function createServer(): McpServer {
       inputSchema: automationRuleSchema,
       annotations: cleanupPlanAnnotations,
     },
-    async ({ name, action, destination, match }) => {
+    async ({ name, action, destination, scheduleMinutes, match }) => {
       try {
         if ((action === "move") !== Boolean(destination?.trim())) {
           throw new Error("destination is required only for move rules");
@@ -396,6 +397,7 @@ export function createServer(): McpServer {
             name: name.trim(),
             action,
             enabled: false,
+            ...(scheduleMinutes ? { scheduleMinutes } : {}),
             ...(destination ? { destination: destination.trim() } : {}),
             match: {
               folder: match.folder,
@@ -410,6 +412,32 @@ export function createServer(): McpServer {
                 : {}),
             },
           }),
+        });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "set_automation_rule_schedule",
+    {
+      title: "Set a manual automation rule review interval",
+      description:
+        "Set or clear a disabled rule's 15-minute to 7-day review interval. Scheduled runs only create pending-review history; they never change mail.",
+      inputSchema: z.object({
+        ruleId: z.string().uuid(),
+        scheduleMinutes: z.number().int().min(15).max(10080).nullable(),
+      }),
+      annotations: cleanupPlanAnnotations,
+    },
+    async ({ ruleId, scheduleMinutes }) => {
+      try {
+        return success({
+          rule: await cleanupState.setRuleSchedule(
+            ruleId,
+            scheduleMinutes ?? undefined,
+          ),
         });
       } catch (error) {
         return failure(error);
