@@ -94,6 +94,7 @@ This metadata-first design reduces latency, model context usage, and accidental 
 - `top_senders`
 - `mailbox_inventory`
 - `cleanup_candidates`
+- `mailbox_analysis`
 - `search_mail`
 - `get_message`
 

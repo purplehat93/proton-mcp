@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   ProtonMailbox,
   type CleanupCandidatesInput,
+  type MailboxAnalysisInput,
   type MailboxInventoryInput,
   type MessageActionInput,
   type MoveMessagesInput,
@@ -221,6 +222,36 @@ export function createServer(): McpServer {
       try {
         const request = withoutUndefined(input) as CleanupCandidatesInput;
         return success(await mailbox.cleanupCandidates(request));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "mailbox_analysis",
+    {
+      title: "Analyze Proton Mail metadata",
+      description:
+        "Build a bounded read-only analysis of attachment types, duplicate candidates, subject-based thread groups, and newsletter headers. Results are heuristics for review and never mutate mail or fetch message bodies.",
+      inputSchema: z.object({
+        folder: z.string().min(1).optional(),
+        from: z.string().min(1).optional(),
+        to: z.string().min(1).optional(),
+        subject: z.string().min(1).optional(),
+        text: z.string().min(1).optional(),
+        before: z.string().datetime().optional(),
+        after: z.string().datetime().optional(),
+        seen: z.boolean().optional(),
+        hasAttachments: z.boolean().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+      }),
+      annotations: readOnlyAnnotations,
+    },
+    async (input) => {
+      try {
+        const request = withoutUndefined(input) as MailboxAnalysisInput;
+        return success(await mailbox.mailboxAnalysis(request));
       } catch (error) {
         return failure(error);
       }
