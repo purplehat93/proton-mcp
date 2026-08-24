@@ -52,10 +52,22 @@ jobs:
       - name: Notify Discord on failure
         if: env.DISCORD_WEBHOOK_URL != '' && needs.check.result == 'failure'
         env:
-          MESSAGE: "GitHub CI failed for ${{ github.repository }} on ${{ github.ref_name }}\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          TITLE: "GitHub CI failed"
+          COLOR: "15158332"
+          REPOSITORY: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          jq -n --arg content "$MESSAGE" '{content: $content}' |
+          jq -n \
+            --arg title "$TITLE" \
+            --arg color "$COLOR" \
+            --arg repository "$REPOSITORY" \
+            --arg branch "$BRANCH" \
+            --arg commit "$COMMIT" \
+            --arg url "$RUN_URL" \
+            '{username:"CI Alerts",embeds:[{title:$title,url:$url,color:($color|tonumber),fields:[{name:"Repository",value:$repository,inline:true},{name:"Branch",value:$branch,inline:true},{name:"Commit",value:($commit|.[0:7]),inline:true}],footer:{text:"GitHub Actions"}}]}' |
             curl --fail-with-body --silent --show-error \
               -H 'Content-Type: application/json' \
               --data-binary @- "$DISCORD_WEBHOOK_URL"
