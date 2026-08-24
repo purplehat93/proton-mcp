@@ -114,4 +114,37 @@ describe("cleanup workflow state", () => {
     });
     expect(await store.listRuleRuns(rule.id)).toHaveLength(2);
   });
+
+  it("updates disabled rules and cancels unused plans when deleting them", async () => {
+    const store = await stateStore();
+    const rule = await store.createRule({
+      name: "Old",
+      enabled: false,
+      action: "archive",
+      match: { folder: "INBOX", from: "old@example.test" },
+    });
+    const updated = await store.updateRule(rule.id, {
+      name: "New",
+      action: "trash",
+      match: { folder: "INBOX", from: "new@example.test" },
+    });
+    expect(updated).toMatchObject({ name: "New", action: "trash" });
+    await store.setRuleEnabled(rule.id, true);
+    await expect(
+      store.updateRule(rule.id, {
+        name: "No",
+        action: "trash",
+        match: { folder: "INBOX", from: "new@example.test" },
+      }),
+    ).rejects.toThrow(/Disable/);
+    await store.createRuleRun(rule.id, ["message-id"], "INBOX");
+    await store.setRuleEnabled(rule.id, false);
+    await expect(store.deleteRule(rule.id)).resolves.toEqual({
+      cancelledPlans: 1,
+    });
+    expect(await store.listRules()).toEqual([]);
+    expect(await store.listRuleRuns(rule.id)).toMatchObject([
+      { status: "cancelled" },
+    ]);
+  });
 });

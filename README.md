@@ -42,6 +42,9 @@ Manual automation rules are available through `create_automation_rule`,
 default, never run on a schedule, and prepare a reviewable cleanup plan rather
 than changing mail directly.
 
+Disabled rules can be changed with `update_automation_rule` or removed with
+`delete_automation_rule`, which also cancels any unused plan from that rule.
+
 See [`docs/SPEC.md`](docs/SPEC.md) for the tool contract and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the deployment model.
 
 ## Transports

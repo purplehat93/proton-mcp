@@ -459,6 +459,75 @@ export function createServer(): McpServer {
   );
 
   server.registerTool(
+    "update_automation_rule",
+    {
+      title: "Update a disabled manual automation rule",
+      description:
+        "Replace a disabled rule's name, metadata criteria, and action. Disable a rule before changing it; this tool never changes mail.",
+      inputSchema: automationRuleSchema.extend({ ruleId: z.string().uuid() }),
+      annotations: cleanupPlanAnnotations,
+    },
+    async ({ ruleId, name, action, destination, match }) => {
+      try {
+        if ((action === "move") !== Boolean(destination?.trim())) {
+          throw new Error("destination is required only for move rules");
+        }
+        if (
+          match.from === undefined &&
+          match.to === undefined &&
+          match.subject === undefined &&
+          match.before === undefined &&
+          match.after === undefined &&
+          match.seen === undefined &&
+          match.hasAttachments === undefined
+        )
+          throw new Error(
+            "automation rules require at least one match criterion",
+          );
+        return success({
+          rule: await cleanupState.updateRule(ruleId, {
+            name: name.trim(),
+            action,
+            ...(destination ? { destination: destination.trim() } : {}),
+            match: {
+              folder: match.folder,
+              ...(match.from ? { from: match.from } : {}),
+              ...(match.to ? { to: match.to } : {}),
+              ...(match.subject ? { subject: match.subject } : {}),
+              ...(match.before ? { before: match.before } : {}),
+              ...(match.after ? { after: match.after } : {}),
+              ...(match.seen !== undefined ? { seen: match.seen } : {}),
+              ...(match.hasAttachments !== undefined
+                ? { hasAttachments: match.hasAttachments }
+                : {}),
+            },
+          }),
+        });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "delete_automation_rule",
+    {
+      title: "Delete a disabled manual automation rule",
+      description:
+        "Delete a disabled rule and cancel any of its unused confirmation plans. Historical runs remain as cancelled audit records; mail is never changed.",
+      inputSchema: z.object({ ruleId: z.string().uuid() }),
+      annotations: cleanupPlanAnnotations,
+    },
+    async ({ ruleId }) => {
+      try {
+        return success(await cleanupState.deleteRule(ruleId));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
     "prepare_automation_run",
     {
       title: "Evaluate a rule and prepare a confirmed run",
