@@ -17,6 +17,7 @@ const DEFAULT_RESULT_LIMIT = 20;
 const MAX_RESULT_LIMIT = 100;
 const MAX_SEARCH_SCAN = 1000;
 const MAX_SENDER_SCAN = 5000;
+const MAX_INVENTORY_SCAN = 5000;
 const MAX_BODY_BYTES = 256 * 1024;
 
 export type ImapSecurity = "STARTTLS" | "SSL" | "NONE";
@@ -64,6 +65,10 @@ export type TopSendersInput = {
   before?: string;
   after?: string;
   limit?: number;
+};
+
+export type MailboxInventoryInput = TopSendersInput & {
+  scanLimit?: number;
 };
 
 type MessageRef = {
@@ -139,6 +144,14 @@ function boundedLimit(
   const limit = value ?? fallback;
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_RESULT_LIMIT) {
     throw new Error(`limit must be between 1 and ${MAX_RESULT_LIMIT}`);
+  }
+  return limit;
+}
+
+export function parseInventoryScanLimit(value: number | undefined): number {
+  const limit = value ?? MAX_INVENTORY_SCAN;
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_INVENTORY_SCAN) {
+    throw new Error(`scanLimit must be between 1 and ${MAX_INVENTORY_SCAN}`);
   }
   return limit;
 }
@@ -380,7 +393,7 @@ function summarizeMessage(
 }
 
 function buildSearchQuery(
-  input: SearchMailInput | TopSendersInput,
+  input: SearchMailInput | TopSendersInput | MailboxInventoryInput,
 ): SearchObject {
   const query: SearchObject = {};
   if ("from" in input && input.from) query.from = input.from;
@@ -644,6 +657,151 @@ export class ProtonMailbox {
             .slice(0, limit),
           scanned: candidates.length,
           truncated: uids.length > candidates.length,
+        };
+      } finally {
+        lock.release();
+      }
+    });
+  }
+
+  async mailboxInventory(input: MailboxInventoryInput): Promise<{
+    scope: string;
+    matched: number;
+    scanned: number;
+    truncated: boolean;
+    sample: {
+      unread: number;
+      seen: number;
+      withAttachments: number;
+      totalBytes: number;
+    };
+    dateRange: {
+      oldestAt: string | null;
+      newestAt: string | null;
+    };
+    byMonth: Array<{ month: string; count: number }>;
+    senders: Array<{
+      name: string | null;
+      address: string;
+      count: number;
+      latestAt: string | null;
+    }>;
+    domains: Array<{ domain: string; count: number }>;
+  }> {
+    const folder = input.folder ?? "INBOX";
+    const scanLimit = parseInventoryScanLimit(input.scanLimit);
+    const limit = boundedLimit(input.limit, 25);
+
+    return withClient(async (client) => {
+      const lock = await client.getMailboxLock(folder, {
+        readOnly: true,
+        acquireTimeout: 10_000,
+      });
+      try {
+        const found = await client.search(buildSearchQuery(input), {
+          uid: true,
+        });
+        const uids = Array.isArray(found) ? found : [];
+        const candidates = uids.slice(-scanLimit);
+        const messages = candidates.length
+          ? await client.fetchAll(
+              candidates,
+              {
+                envelope: true,
+                flags: true,
+                internalDate: true,
+                size: true,
+                bodyStructure: true,
+              },
+              { uid: true },
+            )
+          : [];
+        const senders = new Map<
+          string,
+          {
+            name: string | null;
+            address: string;
+            count: number;
+            latestAt: string | null;
+          }
+        >();
+        const domains = new Map<string, number>();
+        const months = new Map<string, number>();
+        let unread = 0;
+        let withAttachments = 0;
+        let totalBytes = 0;
+        let oldestAt: string | null = null;
+        let newestAt: string | null = null;
+
+        for (const message of messages) {
+          const receivedAt = messageDate(message);
+          const from = firstAddress(message.envelope?.from);
+          const hasAttachments =
+            findAttachments(message.bodyStructure).length > 0;
+          const seen = message.flags?.has("\\Seen") ?? false;
+
+          if (!seen) unread += 1;
+          if (hasAttachments) withAttachments += 1;
+          totalBytes += message.size ?? 0;
+          if (receivedAt) {
+            if (!oldestAt || receivedAt < oldestAt) oldestAt = receivedAt;
+            if (!newestAt || receivedAt > newestAt) newestAt = receivedAt;
+            const month = receivedAt.slice(0, 7);
+            months.set(month, (months.get(month) ?? 0) + 1);
+          }
+
+          if (!from.address) continue;
+          const key = from.address.toLowerCase();
+          const sender = senders.get(key);
+          if (sender) {
+            sender.count += 1;
+            if (!sender.name && from.name) sender.name = from.name;
+            if ((receivedAt ?? "") > (sender.latestAt ?? "")) {
+              sender.latestAt = receivedAt;
+            }
+          } else {
+            senders.set(key, {
+              name: from.name,
+              address: from.address,
+              count: 1,
+              latestAt: receivedAt,
+            });
+          }
+
+          const at = from.address.lastIndexOf("@");
+          if (at > 0 && at < from.address.length - 1) {
+            const domain = from.address.slice(at + 1).toLowerCase();
+            domains.set(domain, (domains.get(domain) ?? 0) + 1);
+          }
+        }
+
+        return {
+          scope: folder,
+          matched: uids.length,
+          scanned: candidates.length,
+          truncated: uids.length > candidates.length,
+          sample: {
+            unread,
+            seen: messages.length - unread,
+            withAttachments,
+            totalBytes,
+          },
+          dateRange: { oldestAt, newestAt },
+          byMonth: [...months.entries()]
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([month, count]) => ({ month, count })),
+          senders: [...senders.values()]
+            .sort(
+              (a, b) => b.count - a.count || a.address.localeCompare(b.address),
+            )
+            .slice(0, limit),
+          domains: [...domains.entries()]
+            .sort(
+              ([a, countA], [b, countB]) =>
+                countB - countA || a.localeCompare(b),
+            )
+            .slice(0, limit)
+            .map(([domain, count]) => ({ domain, count })),
         };
       } finally {
         lock.release();

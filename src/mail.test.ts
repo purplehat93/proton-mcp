@@ -4,7 +4,12 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { decodeMessageId, encodeMessageId, loadImapConfig } from "./mail.js";
+import {
+  decodeMessageId,
+  encodeMessageId,
+  loadImapConfig,
+  parseInventoryScanLimit,
+} from "./mail.js";
 
 const tempDirs: string[] = [];
 
@@ -70,5 +75,15 @@ describe("opaque message ids", () => {
 
   it("rejects malformed ids", () => {
     expect(() => decodeMessageId("not-an-id")).toThrow("Invalid message id");
+  });
+});
+
+describe("mailbox inventory bounds", () => {
+  it("defaults to and caps the metadata scan limit", () => {
+    expect(parseInventoryScanLimit(undefined)).toBe(5000);
+    expect(parseInventoryScanLimit(1)).toBe(1);
+    expect(parseInventoryScanLimit(5000)).toBe(5000);
+    expect(() => parseInventoryScanLimit(0)).toThrow(/scanLimit/);
+    expect(() => parseInventoryScanLimit(5001)).toThrow(/scanLimit/);
   });
 });
