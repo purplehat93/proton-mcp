@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 
 import {
   ImapFlow,
+  type CopyResponseObject,
   type FetchMessageObject,
   type ImapFlowOptions,
   type MessageAddressObject,
@@ -84,6 +85,14 @@ export type MailboxAnalysisInput = SearchMailInput & {
   scanLimit?: number;
 };
 
+export type ReceiptCandidatesInput = {
+  folder?: string;
+  before?: string;
+  after?: string;
+  limit?: number;
+  scanLimit?: number;
+};
+
 export type MessageActionInput = {
   ids: string[];
   dryRun?: boolean;
@@ -91,6 +100,20 @@ export type MessageActionInput = {
 
 export type MoveMessagesInput = MessageActionInput & {
   destination: string;
+};
+
+export type MutationResult = {
+  action: string;
+  dryRun: boolean;
+  requested: number;
+  affected: number;
+  folders: string[];
+  destination?: string;
+  undo?: {
+    sourceFolder: string;
+    destination: string;
+    destinationIds: string[];
+  };
 };
 
 type MessageRef = {
@@ -611,16 +634,9 @@ export class ProtonMailbox {
     dryRun: boolean | undefined,
     action: "read" | "unread" | "archive" | "trash" | "move" | "copy",
     destination?: string,
-  ): Promise<{
-    action: string;
-    dryRun: boolean;
-    requested: number;
-    affected: number;
-    folders: string[];
-    destination?: string;
-  }> {
+  ): Promise<MutationResult> {
     const refs = messageIds(ids);
-    const planned = {
+    const planned: MutationResult = {
       action,
       dryRun: dryRun === true,
       requested: refs.length,
@@ -669,6 +685,8 @@ export class ProtonMailbox {
             throw new Error("one or more message ids no longer exist");
           }
           let result: boolean;
+          let copied: CopyResponseObject | false = false;
+          let resolvedDestination = destination;
           if (action === "read") {
             result = await client.messageFlagsAdd(uids, ["\\Seen"], {
               uid: true,
@@ -679,23 +697,48 @@ export class ProtonMailbox {
             });
           } else if (action === "move") {
             if (!destination) throw new Error("destination is required");
-            result = Boolean(
-              await client.messageMove(uids, destination, { uid: true }),
-            );
+            copied = await client.messageMove(uids, destination, { uid: true });
+            result = Boolean(copied);
           } else if (action === "copy") {
             if (!destination) throw new Error("destination is required");
-            result = Boolean(
-              await client.messageCopy(uids, destination, { uid: true }),
-            );
+            copied = await client.messageCopy(uids, destination, { uid: true });
+            result = Boolean(copied);
           } else {
             const target =
               destination ?? (await this.specialFolder(client, action));
-            result = Boolean(
-              await client.messageMove(uids, target, { uid: true }),
-            );
+            resolvedDestination = target;
+            copied = await client.messageMove(uids, target, { uid: true });
+            result = Boolean(copied);
           }
           if (!result) throw new Error(`IMAP operation failed for ${folder}`);
           planned.affected += folderRefs.length;
+          if (
+            resolvedDestination &&
+            action !== "copy" &&
+            copied &&
+            copied.uidMap
+          ) {
+            const destinationIds = folderRefs
+              .map((ref) => {
+                const destinationUid = copied.uidMap?.get(ref.uid);
+                if (!destinationUid || !copied.uidValidity) return null;
+                return encodeMessageId({
+                  v: 1,
+                  folder: resolvedDestination,
+                  uid: destinationUid,
+                  uidValidity: copied.uidValidity.toString(),
+                });
+              })
+              .filter((id): id is string => id !== null);
+            if (destinationIds.length === folderRefs.length) {
+              planned.destination = resolvedDestination;
+              planned.undo = {
+                sourceFolder: folder,
+                destination: resolvedDestination,
+                destinationIds,
+              };
+            }
+          }
         } finally {
           lock.release();
         }
@@ -1129,6 +1172,52 @@ export class ProtonMailbox {
             includeUnread,
           },
           candidates: results,
+        };
+      } finally {
+        lock.release();
+      }
+    });
+  }
+
+  async receiptCandidates(input: ReceiptCandidatesInput): Promise<{
+    scope: string;
+    scanned: number;
+    matched: number;
+    truncated: boolean;
+    candidates: Array<MessageSummary & { reasons: string[] }>;
+  }> {
+    const folder = input.folder ?? "INBOX";
+    const scanLimit = Math.min(parseInventoryScanLimit(input.scanLimit), 500);
+    const limit = boundedLimit(input.limit, 50);
+    const receiptPattern =
+      /\b(receipt|invoice|order confirmation|payment confirmation|purchase|your order)\b/i;
+
+    return withClient(async (client) => {
+      const lock = await client.getMailboxLock(folder, {
+        readOnly: true,
+        acquireTimeout: 10_000,
+      });
+      try {
+        const found = await client.search(
+          buildSearchQuery({
+            ...(input.before ? { before: input.before } : {}),
+            ...(input.after ? { after: input.after } : {}),
+          }),
+          { uid: true },
+        );
+        const uids = Array.isArray(found) ? found : [];
+        const candidates = uids.slice(-scanLimit);
+        const summaries = await fetchSummaries(client, folder, candidates);
+        const matched = summaries
+          .filter((summary) => receiptPattern.test(summary.subject ?? ""))
+          .map((summary) => ({ ...summary, reasons: ["receipt-subject"] }))
+          .slice(0, limit);
+        return {
+          scope: folder,
+          scanned: summaries.length,
+          matched: matched.length,
+          truncated: uids.length > candidates.length,
+          candidates: matched,
         };
       } finally {
         lock.release();

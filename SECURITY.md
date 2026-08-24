@@ -41,19 +41,17 @@ Mailbox contents are sensitive data. Tools should return the minimum content req
 
 ## Write actions
 
-When write tools are introduced:
-
-- prefer reversible actions such as archive/move-to-trash;
-- require explicit message identifiers or an explicit bounded query contract;
-- impose maximum batch sizes;
-- return a clear operation summary;
-- do not silently expand a selection;
-- keep permanent deletion separate and disabled by default.
-
 The controlled write surface currently uses explicit opaque message ids, a hard
 batch limit of 50, mailbox UIDVALIDITY checks, and optional dry-run mode. It does
 not accept arbitrary IMAP searches as mutation commands, which prevents a
 changing mailbox from silently expanding a bulk operation.
+
+The cleanup workflow stores only plan metadata, opaque ids, token hashes, and
+operation status in `MCP_STATE_DIR`; it never stores message bodies, credentials,
+or bearer tokens. The directory must be private to the MCP service. Plans are
+single-use and expire after 15 minutes. An interrupted apply or undo is marked
+`needs_review` and is never retried automatically. Undo is exposed only when
+Bridge returns a complete UIDPLUS mapping, so destination UIDs are never guessed.
 
 ## Reporting vulnerabilities
 

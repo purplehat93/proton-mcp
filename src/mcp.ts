@@ -3,14 +3,17 @@ import { z } from "zod";
 
 import {
   ProtonMailbox,
+  decodeMessageId,
   type CleanupCandidatesInput,
   type MailboxAnalysisInput,
   type MailboxInventoryInput,
   type MessageActionInput,
   type MoveMessagesInput,
+  type ReceiptCandidatesInput,
   type SearchMailInput,
   type TopSendersInput,
 } from "./mail.js";
+import { CleanupStateStore } from "./state.js";
 
 function success(output: Record<string, unknown>) {
   return {
@@ -55,6 +58,16 @@ const destructiveMutationAnnotations = {
   destructiveHint: true,
 } as const;
 
+const plannedMutationAnnotations = {
+  ...destructiveMutationAnnotations,
+  idempotentHint: false,
+} as const;
+
+const cleanupPlanAnnotations = {
+  ...mutationAnnotations,
+  idempotentHint: false,
+} as const;
+
 const messageActionSchema = z.object({
   ids: z.array(z.string().min(1)).min(1).max(50),
   dryRun: z.boolean().optional(),
@@ -64,8 +77,15 @@ const moveMessagesSchema = messageActionSchema.extend({
   destination: z.string().min(1),
 });
 
+const cleanupPlanSchema = z.object({
+  action: z.enum(["read", "unread", "archive", "trash", "move", "copy"]),
+  ids: z.array(z.string().min(1)).min(1).max(50),
+  destination: z.string().min(1).optional(),
+});
+
 export function createServer(): McpServer {
   const mailbox = new ProtonMailbox();
+  const cleanupState = new CleanupStateStore();
   const server = new McpServer(
     {
       name: "proton-mcp",
@@ -292,6 +312,186 @@ export function createServer(): McpServer {
     async ({ id }) => {
       try {
         return success(await mailbox.extractReceipt(id));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "receipt_candidates",
+    {
+      title: "Find likely purchase receipts",
+      description:
+        "Find bounded, metadata-only likely receipts using subject-line signals. Review candidates with extract_receipt before taking action; message bodies are not fetched.",
+      inputSchema: z.object({
+        folder: z.string().min(1).optional(),
+        before: z.string().datetime().optional(),
+        after: z.string().datetime().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+        scanLimit: z.number().int().min(1).max(500).optional(),
+      }),
+      annotations: readOnlyAnnotations,
+    },
+    async (input) => {
+      try {
+        return success(
+          await mailbox.receiptCandidates(
+            withoutUndefined(input) as ReceiptCandidatesInput,
+          ),
+        );
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "create_cleanup_plan",
+    {
+      title: "Create a reviewable cleanup plan",
+      description:
+        "Create a 15-minute, one-time confirmation plan for up to 50 explicit message ids from one folder. The plan does not change mail.",
+      inputSchema: cleanupPlanSchema,
+      annotations: cleanupPlanAnnotations,
+    },
+    async ({ action, ids, destination }) => {
+      try {
+        if ((action === "move" || action === "copy") && !destination?.trim()) {
+          throw new Error("destination is required for move and copy plans");
+        }
+        if (
+          (action === "read" ||
+            action === "unread" ||
+            action === "archive" ||
+            action === "trash") &&
+          destination
+        ) {
+          throw new Error("destination is only valid for move and copy plans");
+        }
+        const refs = ids.map(decodeMessageId);
+        const folders = [...new Set(refs.map((ref) => ref.folder))];
+        if (folders.length !== 1)
+          throw new Error("all ids in one plan must belong to the same folder");
+        return success(
+          await cleanupState.createPlan({
+            action,
+            ids,
+            sourceFolder: folders[0]!,
+            ...(destination ? { destination: destination.trim() } : {}),
+          }),
+        );
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "apply_cleanup_plan",
+    {
+      title: "Apply a confirmed cleanup plan",
+      description:
+        "Apply exactly one unexpired cleanup plan using its confirmation token. The plan cannot be reused.",
+      inputSchema: z.object({
+        planId: z.string().uuid(),
+        confirmationToken: z.string().min(1),
+      }),
+      annotations: plannedMutationAnnotations,
+    },
+    async ({ planId, confirmationToken }) => {
+      try {
+        const plan = await cleanupState.claimPlan(planId, confirmationToken);
+        const input = { ids: plan.ids };
+        let result;
+        try {
+          result =
+            plan.action === "read"
+              ? await mailbox.markRead(input)
+              : plan.action === "unread"
+                ? await mailbox.markUnread(input)
+                : plan.action === "archive"
+                  ? await mailbox.archiveMessages(input)
+                  : plan.action === "trash"
+                    ? await mailbox.trashMessages(input)
+                    : plan.action === "move"
+                      ? await mailbox.moveMessages({
+                          ...input,
+                          destination: plan.destination!,
+                        })
+                      : await mailbox.copyMessages({
+                          ...input,
+                          destination: plan.destination!,
+                        });
+          const operation = await cleanupState.completePlan(plan.id, {
+            action: plan.action,
+            sourceFolder: plan.sourceFolder,
+            ...(result.destination ? { destination: result.destination } : {}),
+            ...(result.undo
+              ? {
+                  undo: {
+                    sourceFolder: result.undo.sourceFolder,
+                    destinationIds: result.undo.destinationIds,
+                  },
+                }
+              : {}),
+          });
+          return success({ planId: plan.id, operation, ...result });
+        } catch (error) {
+          await cleanupState.flagPlanForReview(plan.id);
+          throw error;
+        }
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "cleanup_history",
+    {
+      title: "List cleanup operation history",
+      description:
+        "List recent confirmed cleanup operations and whether they have an exact undo record. Message bodies are never stored or returned.",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(100).optional(),
+      }),
+      annotations: readOnlyAnnotations,
+    },
+    async ({ limit }) => {
+      try {
+        return success({
+          operations: await cleanupState.listOperations(limit),
+        });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "undo_cleanup_operation",
+    {
+      title: "Undo an exact cleanup operation",
+      description:
+        "Undo one completed archive, trash, or move operation only when Bridge supplied exact destination UID mappings. The operation cannot be retried after an uncertain failure.",
+      inputSchema: z.object({ operationId: z.string().uuid() }),
+      annotations: plannedMutationAnnotations,
+    },
+    async ({ operationId }) => {
+      try {
+        const operation = await cleanupState.claimUndo(operationId);
+        try {
+          await mailbox.moveMessages({
+            ids: operation.undo!.destinationIds,
+            destination: operation.undo!.sourceFolder,
+          });
+          await cleanupState.completeUndo(operation.id);
+          return success({ operationId: operation.id, status: "undone" });
+        } catch (error) {
+          await cleanupState.flagOperationForReview(operation.id);
+          throw error;
+        }
       } catch (error) {
         return failure(error);
       }

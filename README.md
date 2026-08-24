@@ -2,7 +2,7 @@
 
 A self-hosted Model Context Protocol (MCP) server for Proton Mail, designed to run next to Proton Mail Bridge and expose a small, auditable set of mailbox tools to MCP clients.
 
-> **Status:** early development. `v0.1` is intentionally read-only. The current read-only tool set and both Streamable HTTP and stdio transports are implemented; live deployment status is tracked separately from this source repository.
+> **Status:** early development. Bounded metadata tools, controlled explicit-id writes, and the reviewable cleanup workflow are implemented. Live deployment status is tracked separately from this source repository.
 
 ## Goals
 
@@ -11,7 +11,7 @@ A self-hosted Model Context Protocol (MCP) server for Proton Mail, designed to r
 - Talk to Bridge over local IMAP/SMTP rather than handling Proton encryption directly.
 - Expose narrow MCP tools instead of generic shell or filesystem access.
 - Make mailbox cleanup efficient by returning metadata first and full message bodies only on demand.
-- Add controlled write actions only after the read-only interface is well tested.
+- Keep mutations explicit, bounded, reviewable, and reversible where IMAP can prove an exact reversal.
 
 ## v0.1 tools
 
@@ -24,11 +24,18 @@ A self-hosted Model Context Protocol (MCP) server for Proton Mail, designed to r
 - `search_mail`
 - `get_message`
 - `extract_receipt`
+- `receipt_candidates`
 
 Controlled management tools are also available for bounded, explicit-id
 operations: `mark_read`, `mark_unread`, `archive_messages`, `move_messages`,
 `copy_messages`, and `trash_messages`. They support `dryRun`; permanent deletion
 is not exposed.
+
+For reviewed batches, use `create_cleanup_plan` followed by
+`apply_cleanup_plan`. Plans expire after 15 minutes and require a one-time
+confirmation token. `cleanup_history` and `undo_cleanup_operation` are available
+only for completed operations; undo is offered only when Bridge returns exact
+destination UID mappings.
 
 See [`docs/SPEC.md`](docs/SPEC.md) for the tool contract and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the deployment model.
 

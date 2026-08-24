@@ -1,0 +1,87 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import { CleanupStateStore } from "./state.js";
+
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    tempDirs
+      .splice(0)
+      .map((path) => rm(path, { recursive: true, force: true })),
+  );
+});
+
+async function stateStore(): Promise<CleanupStateStore> {
+  const directory = await mkdtemp(join(tmpdir(), "proton-mcp-state-"));
+  tempDirs.push(directory);
+  return new CleanupStateStore(directory);
+}
+
+describe("cleanup workflow state", () => {
+  it("returns a one-time token without exposing its stored hash", async () => {
+    const store = await stateStore();
+    const plan = await store.createPlan({
+      action: "archive",
+      ids: ["message-id"],
+      sourceFolder: "INBOX",
+    });
+
+    expect(plan.confirmationToken).toBeTruthy();
+    expect(plan).not.toHaveProperty("confirmationHash");
+    await expect(store.claimPlan(plan.id, "wrong-token")).rejects.toThrow(
+      /confirmation token is invalid/,
+    );
+  });
+
+  it("claims a plan once and persists an exact undo record", async () => {
+    const store = await stateStore();
+    const plan = await store.createPlan({
+      action: "move",
+      ids: ["message-id"],
+      sourceFolder: "INBOX",
+      destination: "Archive",
+    });
+
+    await store.claimPlan(plan.id, plan.confirmationToken);
+    await expect(
+      store.claimPlan(plan.id, plan.confirmationToken),
+    ).rejects.toThrow(/in_progress/);
+    const operation = await store.completePlan(plan.id, {
+      action: "move",
+      sourceFolder: "INBOX",
+      destination: "Archive",
+      undo: { sourceFolder: "INBOX", destinationIds: ["destination-id"] },
+    });
+
+    expect(await store.listOperations()).toEqual([operation]);
+    await expect(store.claimUndo(operation.id)).resolves.toMatchObject({
+      id: operation.id,
+      status: "undo_in_progress",
+    });
+  });
+
+  it("refuses undo where Bridge did not return an exact UID mapping", async () => {
+    const store = await stateStore();
+    const plan = await store.createPlan({
+      action: "copy",
+      ids: ["message-id"],
+      sourceFolder: "INBOX",
+      destination: "Archive",
+    });
+    await store.claimPlan(plan.id, plan.confirmationToken);
+    const operation = await store.completePlan(plan.id, {
+      action: "copy",
+      sourceFolder: "INBOX",
+      destination: "Archive",
+    });
+
+    await expect(store.claimUndo(operation.id)).rejects.toThrow(
+      /cannot be undone/,
+    );
+  });
+});
