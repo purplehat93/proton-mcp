@@ -50,6 +50,11 @@ When write tools are introduced:
 - do not silently expand a selection;
 - keep permanent deletion separate and disabled by default.
 
+The controlled write surface currently uses explicit opaque message ids, a hard
+batch limit of 50, mailbox UIDVALIDITY checks, and optional dry-run mode. It does
+not accept arbitrary IMAP searches as mutation commands, which prevents a
+changing mailbox from silently expanding a bulk operation.
+
 ## Reporting vulnerabilities
 
 Do not include real mailbox contents, credentials, tokens, or Bridge state in public issues. Describe the reproduction with synthetic data and redact sensitive logs.

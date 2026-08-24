@@ -9,6 +9,11 @@
 - Schema validation for all MCP inputs
 - Synthetic fixtures only in tests
 
+Mise manages the project runtime. The checked-in `mise.toml` selects Node 20;
+with mise's zsh activation enabled, entering this repository automatically
+selects the configured version. For a shell-independent command, use
+`mise exec -- <command>`.
+
 Exact dependency versions belong in `package.json` and should be updated deliberately rather than copied from documentation examples.
 
 ## Commands
@@ -27,6 +32,14 @@ make smoke
 ```
 
 `make check` is the normal completion criterion for code changes. It should remain fast enough to run routinely and should cover formatting/linting, type checking, and tests.
+
+For a fresh checkout, run:
+
+```bash
+mise install
+mise exec -- npm ci
+mise exec -- npm run check
+```
 
 `make docker-check` should build the production image and validate the example Compose file without requiring real credentials.
 
