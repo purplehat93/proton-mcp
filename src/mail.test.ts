@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  ProtonMailbox,
   decodeMessageId,
   encodeMessageId,
   loadImapConfig,
@@ -85,5 +86,77 @@ describe("mailbox inventory bounds", () => {
     expect(parseInventoryScanLimit(5000)).toBe(5000);
     expect(() => parseInventoryScanLimit(0)).toThrow(/scanLimit/);
     expect(() => parseInventoryScanLimit(5001)).toThrow(/scanLimit/);
+  });
+});
+
+describe("mailbox mutation bounds", () => {
+  const id = encodeMessageId({
+    v: 1,
+    folder: "INBOX",
+    uid: 42,
+    uidValidity: "123456789",
+  });
+
+  it("supports dry-run without connecting to Bridge", async () => {
+    await expect(
+      new ProtonMailbox().archiveMessages({ ids: [id], dryRun: true }),
+    ).resolves.toEqual({
+      action: "archive",
+      dryRun: true,
+      requested: 1,
+      affected: 0,
+      folders: ["INBOX"],
+    });
+  });
+
+  it("rejects duplicate and oversized selections", async () => {
+    await expect(
+      new ProtonMailbox().markRead({ ids: [id, id], dryRun: true }),
+    ).rejects.toThrow(/unique/);
+    await expect(
+      new ProtonMailbox().markRead({
+        ids: Array.from({ length: 51 }, (_, index) =>
+          encodeMessageId({
+            v: 1,
+            folder: "INBOX",
+            uid: index + 1,
+            uidValidity: "123456789",
+          }),
+        ),
+        dryRun: true,
+      }),
+    ).rejects.toThrow(/between 1 and 50/);
+  });
+
+  it("requires a destination for move and copy", async () => {
+    await expect(
+      new ProtonMailbox().moveMessages({
+        ids: [id],
+        destination: "  ",
+        dryRun: true,
+      }),
+    ).rejects.toThrow(/destination/);
+    await expect(
+      new ProtonMailbox().copyMessages({
+        ids: [id],
+        destination: "  ",
+        dryRun: true,
+      }),
+    ).rejects.toThrow(/destination/);
+  });
+
+  it("rejects selections spanning multiple folders", async () => {
+    const otherFolderId = encodeMessageId({
+      v: 1,
+      folder: "Archive",
+      uid: 43,
+      uidValidity: "123456789",
+    });
+    await expect(
+      new ProtonMailbox().markRead({
+        ids: [id, otherFolderId],
+        dryRun: true,
+      }),
+    ).rejects.toThrow(/same folder/);
   });
 });

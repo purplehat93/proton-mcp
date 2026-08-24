@@ -3,7 +3,10 @@ import { z } from "zod";
 
 import {
   ProtonMailbox,
+  type CleanupCandidatesInput,
   type MailboxInventoryInput,
+  type MessageActionInput,
+  type MoveMessagesInput,
   type SearchMailInput,
   type TopSendersInput,
 } from "./mail.js";
@@ -39,6 +42,27 @@ const readOnlyAnnotations = {
   openWorldHint: false,
 } as const;
 
+const mutationAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+
+const destructiveMutationAnnotations = {
+  ...mutationAnnotations,
+  destructiveHint: true,
+} as const;
+
+const messageActionSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(50),
+  dryRun: z.boolean().optional(),
+});
+
+const moveMessagesSchema = messageActionSchema.extend({
+  destination: z.string().min(1),
+});
+
 export function createServer(): McpServer {
   const mailbox = new ProtonMailbox();
   const server = new McpServer(
@@ -48,7 +72,7 @@ export function createServer(): McpServer {
     },
     {
       instructions:
-        "Read-only Proton Mail access via Proton Mail Bridge. Prefer metadata/search tools before fetching individual message bodies. Message ids are opaque and should be passed unchanged to get_message.",
+        "Proton Mail access via Proton Mail Bridge. Prefer metadata/search tools before fetching individual message bodies. Message ids are opaque and should be passed unchanged to get_message or explicit bounded write tools. Write tools support dryRun and never permanently delete messages.",
     },
   );
 
@@ -170,6 +194,40 @@ export function createServer(): McpServer {
   );
 
   server.registerTool(
+    "cleanup_candidates",
+    {
+      title: "Find Proton Mail cleanup candidates",
+      description:
+        "Return bounded metadata-only candidates for review before cleanup. Candidates are read messages from frequent senders and optionally older than a requested age; this tool never mutates mail.",
+      inputSchema: z.object({
+        folder: z.string().min(1).optional(),
+        from: z.string().min(1).optional(),
+        to: z.string().min(1).optional(),
+        subject: z.string().min(1).optional(),
+        text: z.string().min(1).optional(),
+        before: z.string().datetime().optional(),
+        after: z.string().datetime().optional(),
+        seen: z.boolean().optional(),
+        hasAttachments: z.boolean().optional(),
+        olderThanDays: z.number().int().min(1).max(36500).optional(),
+        minSenderCount: z.number().int().min(2).max(5000).optional(),
+        includeUnread: z.boolean().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+        scanLimit: z.number().int().min(1).max(5000).optional(),
+      }),
+      annotations: readOnlyAnnotations,
+    },
+    async (input) => {
+      try {
+        const request = withoutUndefined(input) as CleanupCandidatesInput;
+        return success(await mailbox.cleanupCandidates(request));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
     "get_message",
     {
       title: "Read one Proton Mail message",
@@ -183,6 +241,118 @@ export function createServer(): McpServer {
     async ({ id }) => {
       try {
         return success(await mailbox.getMessage(id));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "mark_read",
+    {
+      title: "Mark Proton Mail messages read",
+      description:
+        "Mark up to 50 messages read using opaque ids returned by search_mail. Use dryRun to inspect the intended operation without changing mail.",
+      inputSchema: messageActionSchema,
+      annotations: mutationAnnotations,
+    },
+    async (input) => {
+      try {
+        return success(await mailbox.markRead(input as MessageActionInput));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "mark_unread",
+    {
+      title: "Mark Proton Mail messages unread",
+      description:
+        "Mark up to 50 messages unread using opaque ids returned by search_mail. Use dryRun to inspect the intended operation without changing mail.",
+      inputSchema: messageActionSchema,
+      annotations: mutationAnnotations,
+    },
+    async (input) => {
+      try {
+        return success(await mailbox.markUnread(input as MessageActionInput));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "archive_messages",
+    {
+      title: "Archive Proton Mail messages",
+      description:
+        "Move up to 50 messages to Proton's Archive folder using opaque ids returned by search_mail. Supports dryRun and never permanently deletes mail.",
+      inputSchema: messageActionSchema,
+      annotations: mutationAnnotations,
+    },
+    async (input) => {
+      try {
+        return success(
+          await mailbox.archiveMessages(input as MessageActionInput),
+        );
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "trash_messages",
+    {
+      title: "Move Proton Mail messages to Trash",
+      description:
+        "Move up to 50 messages to Proton's Trash folder using opaque ids returned by search_mail. Supports dryRun; permanent deletion is not exposed.",
+      inputSchema: messageActionSchema,
+      annotations: destructiveMutationAnnotations,
+    },
+    async (input) => {
+      try {
+        return success(
+          await mailbox.trashMessages(input as MessageActionInput),
+        );
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "move_messages",
+    {
+      title: "Move Proton Mail messages",
+      description:
+        "Move up to 50 messages to an explicit Proton Mail folder or label using opaque ids returned by search_mail. Supports dryRun.",
+      inputSchema: moveMessagesSchema,
+      annotations: mutationAnnotations,
+    },
+    async (input) => {
+      try {
+        return success(await mailbox.moveMessages(input as MoveMessagesInput));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "copy_messages",
+    {
+      title: "Copy Proton Mail messages",
+      description:
+        "Copy up to 50 messages to an explicit Proton Mail folder or label using opaque ids returned by search_mail. Supports dryRun.",
+      inputSchema: moveMessagesSchema,
+      annotations: mutationAnnotations,
+    },
+    async (input) => {
+      try {
+        return success(await mailbox.copyMessages(input as MoveMessagesInput));
       } catch (error) {
         return failure(error);
       }
