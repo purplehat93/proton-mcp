@@ -223,6 +223,71 @@ function headerValue(headers: Buffer | undefined, name: string): string | null {
   return headers.toString("utf8").match(pattern)?.[1]?.trim() ?? null;
 }
 
+export function extractReceiptDetails(input: {
+  from: AddressSummary[];
+  subject: string | null;
+  receivedAt: string | null;
+  text: string | null;
+  html: string | null;
+  bodyTruncated: boolean;
+}): {
+  isReceipt: boolean;
+  confidence: "low" | "medium" | "high";
+  merchant: string | null;
+  orderNumber: string | null;
+  amounts: Array<{ value: string; currency: string | null }>;
+  receivedAt: string | null;
+  bodyTruncated: boolean;
+  signals: string[];
+} {
+  const body =
+    `${input.subject ?? ""}\n${input.text ?? ""}\n${input.html ?? ""}`
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ");
+  const signals: string[] = [];
+  if (
+    /\b(receipt|invoice|order confirmation|payment confirmation|purchase)\b/i.test(
+      body,
+    )
+  ) {
+    signals.push("receipt-keyword");
+  }
+  const order = body.match(
+    /\b(?:order|invoice|receipt)\s*(?:number|no\.?|id|#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{3,})\b/i,
+  );
+  if (order) signals.push("order-reference");
+  const amounts = [
+    ...body.matchAll(
+      /(?:([€$£])\s*([0-9]+(?:[.,][0-9]{2})?)|(EUR|USD|GBP)\s*([0-9]+(?:[.,][0-9]{2})?)|([0-9]+(?:[.,][0-9]{2})?)\s*(EUR|USD|GBP))/gi,
+    ),
+  ]
+    .slice(0, 10)
+    .map((match) => ({
+      value: match[2] ?? match[4] ?? match[5] ?? "",
+      currency:
+        match[1] === "€"
+          ? "EUR"
+          : match[1] === "$"
+            ? "USD"
+            : match[1] === "£"
+              ? "GBP"
+              : (match[3]?.toUpperCase() ?? match[6]?.toUpperCase() ?? null),
+    }));
+  if (amounts.length) signals.push("currency-amount");
+  const confidence =
+    signals.length >= 3 ? "high" : signals.length >= 2 ? "medium" : "low";
+  return {
+    isReceipt: signals.length >= 2,
+    confidence,
+    merchant: input.from[0]?.name ?? input.from[0]?.address ?? null,
+    orderNumber: order?.[1] ?? null,
+    amounts,
+    receivedAt: input.receivedAt,
+    bodyTruncated: input.bodyTruncated,
+    signals,
+  };
+}
+
 export async function loadImapConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ImapConfig> {
@@ -1300,6 +1365,15 @@ export class ProtonMailbox {
         lock.release();
       }
     });
+  }
+
+  async extractReceipt(id: string) {
+    const message = await this.getMessage(id);
+    return {
+      id: message.id,
+      ...extractReceiptDetails(message),
+      attachments: message.attachments,
+    };
   }
 
   async markRead(input: MessageActionInput) {
