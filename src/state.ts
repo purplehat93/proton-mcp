@@ -20,6 +20,38 @@ export type StoredPlan = {
   expiresAt: string;
   status: "pending" | "in_progress" | "completed" | "needs_review";
   appliedAt?: string;
+  ruleRunId?: string;
+};
+
+export type AutomationAction = Exclude<CleanupAction, "copy">;
+
+export type AutomationRule = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  action: AutomationAction;
+  destination?: string;
+  match: {
+    folder: string;
+    from?: string;
+    to?: string;
+    subject?: string;
+    before?: string;
+    after?: string;
+    seen?: boolean;
+    hasAttachments?: boolean;
+  };
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AutomationRun = {
+  id: string;
+  ruleId: string;
+  createdAt: string;
+  candidateCount: number;
+  planId?: string;
+  status: "no_matches" | "pending_confirmation" | "applied" | "needs_review";
 };
 
 export type CleanupOperation = {
@@ -41,6 +73,8 @@ type StateDocument = {
   version: 1;
   plans: StoredPlan[];
   operations: CleanupOperation[];
+  rules: AutomationRule[];
+  ruleRuns: AutomationRun[];
 };
 
 function tokenHash(token: string): string {
@@ -126,6 +160,10 @@ export class CleanupStateStore {
       if (!plan) throw new Error("Cleanup plan not found");
       plan.status = "completed";
       plan.appliedAt = operation.appliedAt;
+      if (plan.ruleRunId) {
+        const run = state.ruleRuns.find((item) => item.id === plan.ruleRunId);
+        if (run) run.status = "applied";
+      }
       state.operations.push(operation);
     });
     return operation;
@@ -133,6 +171,106 @@ export class CleanupStateStore {
 
   async flagPlanForReview(id: string): Promise<void> {
     await this.setStatus(id, "needs_review");
+  }
+
+  async createRule(
+    input: Omit<AutomationRule, "id" | "createdAt" | "updatedAt">,
+  ): Promise<AutomationRule> {
+    const now = new Date().toISOString();
+    const rule: AutomationRule = {
+      ...input,
+      id: randomUUID(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.mutate((state) => state.rules.push(rule));
+    return rule;
+  }
+
+  async listRules(): Promise<AutomationRule[]> {
+    return (await this.read()).rules
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async setRuleEnabled(id: string, enabled: boolean): Promise<AutomationRule> {
+    let rule: AutomationRule | undefined;
+    await this.mutate((state) => {
+      rule = state.rules.find((item) => item.id === id);
+      if (!rule) throw new Error("Automation rule not found");
+      rule.enabled = enabled;
+      rule.updatedAt = new Date().toISOString();
+    });
+    return rule!;
+  }
+
+  async getRule(id: string): Promise<AutomationRule> {
+    const rule = (await this.read()).rules.find((item) => item.id === id);
+    if (!rule) throw new Error("Automation rule not found");
+    return rule;
+  }
+
+  async createRuleRun(
+    ruleId: string,
+    ids: string[],
+    sourceFolder: string,
+  ): Promise<{
+    run: AutomationRun;
+    plan?: Omit<StoredPlan, "confirmationHash"> & { confirmationToken: string };
+  }> {
+    let output!: {
+      run: AutomationRun;
+      plan?: Omit<StoredPlan, "confirmationHash"> & {
+        confirmationToken: string;
+      };
+    };
+    await this.mutate((state) => {
+      const rule = state.rules.find((item) => item.id === ruleId);
+      if (!rule) throw new Error("Automation rule not found");
+      if (!rule.enabled) throw new Error("Automation rule is disabled");
+      const now = new Date();
+      const run: AutomationRun = {
+        id: randomUUID(),
+        ruleId,
+        createdAt: now.toISOString(),
+        candidateCount: ids.length,
+        status: ids.length === 0 ? "no_matches" : "pending_confirmation",
+      };
+      state.ruleRuns.push(run);
+      if (ids.length === 0) {
+        output = { run };
+        return;
+      }
+      const confirmationToken = randomBytes(24).toString("base64url");
+      const plan: StoredPlan = {
+        id: randomUUID(),
+        action: rule.action,
+        ids,
+        sourceFolder,
+        ...(rule.destination ? { destination: rule.destination } : {}),
+        confirmationHash: tokenHash(confirmationToken),
+        createdAt: now.toISOString(),
+        expiresAt: new Date(now.getTime() + PLAN_TTL_MS).toISOString(),
+        status: "pending",
+        ruleRunId: run.id,
+      };
+      run.planId = plan.id;
+      state.plans = state.plans.filter(
+        (item) => item.expiresAt > now.toISOString(),
+      );
+      state.plans.push(plan);
+      const { confirmationHash: _hash, ...publicPlan } = plan;
+      void _hash;
+      output = { run, plan: { ...publicPlan, confirmationToken } };
+    });
+    return output;
+  }
+
+  async listRuleRuns(ruleId?: string, limit = 20): Promise<AutomationRun[]> {
+    return (await this.read()).ruleRuns
+      .filter((run) => !ruleId || run.ruleId === ruleId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit);
   }
 
   async listOperations(limit = 20): Promise<CleanupOperation[]> {
@@ -185,6 +323,10 @@ export class CleanupStateStore {
       if (!plan) throw new Error("Cleanup plan not found");
       plan.status = status;
       if (status === "completed") plan.appliedAt = new Date().toISOString();
+      if (status === "needs_review" && plan.ruleRunId) {
+        const run = state.ruleRuns.find((item) => item.id === plan.ruleRunId);
+        if (run) run.status = "needs_review";
+      }
     });
   }
 
@@ -221,12 +363,26 @@ export class CleanupStateStore {
             "operations" in value && Array.isArray(value.operations)
               ? (value.operations as CleanupOperation[])
               : [],
+          rules:
+            "rules" in value && Array.isArray(value.rules)
+              ? (value.rules as AutomationRule[])
+              : [],
+          ruleRuns:
+            "ruleRuns" in value && Array.isArray(value.ruleRuns)
+              ? (value.ruleRuns as AutomationRun[])
+              : [],
         };
       }
       throw new Error("Cleanup state file is invalid");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return { version: 1, plans: [], operations: [] };
+        return {
+          version: 1,
+          plans: [],
+          operations: [],
+          rules: [],
+          ruleRuns: [],
+        };
       }
       throw error;
     }

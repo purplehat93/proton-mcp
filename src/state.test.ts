@@ -84,4 +84,34 @@ describe("cleanup workflow state", () => {
       /cannot be undone/,
     );
   });
+
+  it("creates a disabled rule and produces a confirmation plan only for matches", async () => {
+    const store = await stateStore();
+    const rule = await store.createRule({
+      name: "Archive old notices",
+      enabled: false,
+      action: "archive",
+      match: { folder: "INBOX", from: "notices@example.test" },
+    });
+    await expect(
+      store.createRuleRun(rule.id, ["message-id"], "INBOX"),
+    ).rejects.toThrow(/disabled/);
+    await store.setRuleEnabled(rule.id, true);
+
+    const empty = await store.createRuleRun(rule.id, [], "INBOX");
+    expect(empty.run.status).toBe("no_matches");
+    expect(empty.plan).toBeUndefined();
+
+    const prepared = await store.createRuleRun(
+      rule.id,
+      ["message-id"],
+      "INBOX",
+    );
+    expect(prepared.run.status).toBe("pending_confirmation");
+    expect(prepared.plan).toMatchObject({
+      action: "archive",
+      ids: ["message-id"],
+    });
+    expect(await store.listRuleRuns(rule.id)).toHaveLength(2);
+  });
 });
