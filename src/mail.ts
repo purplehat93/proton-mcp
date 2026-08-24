@@ -19,6 +19,7 @@ const MAX_SEARCH_SCAN = 1000;
 const MAX_SENDER_SCAN = 5000;
 const MAX_INVENTORY_SCAN = 5000;
 const MAX_BODY_BYTES = 256 * 1024;
+const MAX_MUTATION_BATCH = 50;
 
 export type ImapSecurity = "STARTTLS" | "SSL" | "NONE";
 
@@ -69,6 +70,22 @@ export type TopSendersInput = {
 
 export type MailboxInventoryInput = TopSendersInput & {
   scanLimit?: number;
+};
+
+export type CleanupCandidatesInput = SearchMailInput & {
+  olderThanDays?: number;
+  minSenderCount?: number;
+  includeUnread?: boolean;
+  scanLimit?: number;
+};
+
+export type MessageActionInput = {
+  ids: string[];
+  dryRun?: boolean;
+};
+
+export type MoveMessagesInput = MessageActionInput & {
+  destination: string;
 };
 
 type MessageRef = {
@@ -148,12 +165,43 @@ function boundedLimit(
   return limit;
 }
 
+function messageIds(value: string[]): MessageRef[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > MAX_MUTATION_BATCH
+  ) {
+    throw new Error(
+      `ids must contain between 1 and ${MAX_MUTATION_BATCH} message ids`,
+    );
+  }
+  const unique = [...new Set(value)];
+  if (unique.length !== value.length) throw new Error("ids must be unique");
+  return unique.map(decodeMessageId);
+}
+
 export function parseInventoryScanLimit(value: number | undefined): number {
   const limit = value ?? MAX_INVENTORY_SCAN;
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_INVENTORY_SCAN) {
     throw new Error(`scanLimit must be between 1 and ${MAX_INVENTORY_SCAN}`);
   }
   return limit;
+}
+
+function parseDays(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value < 1 || value > 36500) {
+    throw new Error("olderThanDays must be between 1 and 36500");
+  }
+  return value;
+}
+
+function parseSenderThreshold(value: number | undefined): number {
+  const threshold = value ?? 10;
+  if (!Number.isInteger(threshold) || threshold < 2 || threshold > 5000) {
+    throw new Error("minSenderCount must be between 2 and 5000");
+  }
+  return threshold;
 }
 
 export async function loadImapConfig(
@@ -474,6 +522,116 @@ async function downloadTextPart(
 }
 
 export class ProtonMailbox {
+  private async mutateMessages(
+    ids: string[],
+    dryRun: boolean | undefined,
+    action: "read" | "unread" | "archive" | "trash" | "move" | "copy",
+    destination?: string,
+  ): Promise<{
+    action: string;
+    dryRun: boolean;
+    requested: number;
+    affected: number;
+    folders: string[];
+    destination?: string;
+  }> {
+    const refs = messageIds(ids);
+    const planned = {
+      action,
+      dryRun: dryRun === true,
+      requested: refs.length,
+      affected: 0,
+      folders: [...new Set(refs.map((ref) => ref.folder))],
+      ...(destination ? { destination } : {}),
+    };
+    if (planned.folders.length > 1) {
+      throw new Error(
+        "all ids in one operation must belong to the same folder",
+      );
+    }
+    if (dryRun) return planned;
+
+    return withClient(async (client) => {
+      const groups = new Map<string, MessageRef[]>();
+      for (const ref of refs) {
+        const group = groups.get(ref.folder) ?? [];
+        group.push(ref);
+        groups.set(ref.folder, group);
+      }
+
+      for (const [folder, folderRefs] of groups) {
+        const lock = await client.getMailboxLock(folder, {
+          readOnly: false,
+          acquireTimeout: 10_000,
+        });
+        try {
+          const mailbox = client.mailbox;
+          if (!mailbox) throw new Error("Mailbox was not opened");
+          for (const ref of folderRefs) {
+            if (mailbox.uidValidity.toString() !== ref.uidValidity) {
+              throw new Error(
+                `Message id is stale because mailbox UIDVALIDITY changed for ${folder}`,
+              );
+            }
+          }
+
+          const uids = folderRefs.map((ref) => ref.uid);
+          const existing = await client.fetchAll(
+            uids,
+            { uid: true },
+            { uid: true },
+          );
+          if (existing.length !== uids.length) {
+            throw new Error("one or more message ids no longer exist");
+          }
+          let result: boolean;
+          if (action === "read") {
+            result = await client.messageFlagsAdd(uids, ["\\Seen"], {
+              uid: true,
+            });
+          } else if (action === "unread") {
+            result = await client.messageFlagsRemove(uids, ["\\Seen"], {
+              uid: true,
+            });
+          } else if (action === "move") {
+            if (!destination) throw new Error("destination is required");
+            result = Boolean(
+              await client.messageMove(uids, destination, { uid: true }),
+            );
+          } else if (action === "copy") {
+            if (!destination) throw new Error("destination is required");
+            result = Boolean(
+              await client.messageCopy(uids, destination, { uid: true }),
+            );
+          } else {
+            const target =
+              destination ?? (await this.specialFolder(client, action));
+            result = Boolean(
+              await client.messageMove(uids, target, { uid: true }),
+            );
+          }
+          if (!result) throw new Error(`IMAP operation failed for ${folder}`);
+          planned.affected += folderRefs.length;
+        } finally {
+          lock.release();
+        }
+      }
+      return planned;
+    });
+  }
+
+  private async specialFolder(
+    client: ImapFlow,
+    action: "archive" | "trash",
+  ): Promise<string> {
+    const wanted = action === "archive" ? "\\Archive" : "\\Trash";
+    const folders = await client.list();
+    const match = folders.find((folder) => folder.specialUse === wanted);
+    if (!match)
+      throw new Error(`No ${action} folder is exposed by Proton Mail Bridge`);
+    return match.path;
+  }
+
   async listFolders(): Promise<{
     folders: Array<{
       name: string;
@@ -809,6 +967,91 @@ export class ProtonMailbox {
     });
   }
 
+  async cleanupCandidates(input: CleanupCandidatesInput): Promise<{
+    scope: string;
+    scanned: number;
+    matched: number;
+    truncated: boolean;
+    criteria: {
+      olderThanDays: number | null;
+      minSenderCount: number;
+      includeUnread: boolean;
+    };
+    candidates: Array<MessageSummary & { reasons: string[] }>;
+  }> {
+    const folder = input.folder ?? "INBOX";
+    const scanLimit = parseInventoryScanLimit(input.scanLimit);
+    const limit = boundedLimit(input.limit, 50);
+    const olderThanDays = parseDays(input.olderThanDays);
+    const minSenderCount = parseSenderThreshold(input.minSenderCount);
+    const includeUnread = input.includeUnread === true;
+    const cutoff = olderThanDays
+      ? Date.now() - olderThanDays * 24 * 60 * 60 * 1000
+      : null;
+
+    return withClient(async (client) => {
+      const lock = await client.getMailboxLock(folder, {
+        readOnly: true,
+        acquireTimeout: 10_000,
+      });
+      try {
+        const searchInput = {
+          ...input,
+          seen: input.includeUnread ? input.seen : (input.seen ?? true),
+        };
+        const found = await client.search(buildSearchQuery(searchInput), {
+          uid: true,
+        });
+        const uids = Array.isArray(found) ? found : [];
+        const candidates = uids.slice(-scanLimit);
+        const summaries = await fetchSummaries(client, folder, candidates);
+        const senderCounts = new Map<string, number>();
+        for (const summary of summaries) {
+          const key = summary.from.address?.toLowerCase() ?? "";
+          senderCounts.set(key, (senderCounts.get(key) ?? 0) + 1);
+        }
+
+        const results = summaries
+          .map((summary) => {
+            const reasons: string[] = [];
+            const senderKey = summary.from.address?.toLowerCase() ?? "";
+            if ((senderCounts.get(senderKey) ?? 0) >= minSenderCount) {
+              reasons.push("frequent_sender");
+            }
+            if (
+              cutoff !== null &&
+              summary.seen &&
+              summary.receivedAt &&
+              new Date(summary.receivedAt).getTime() <= cutoff
+            ) {
+              reasons.push("old_read");
+            }
+            return reasons.length ? { ...summary, reasons } : null;
+          })
+          .filter(
+            (summary): summary is MessageSummary & { reasons: string[] } =>
+              summary !== null,
+          )
+          .slice(0, limit);
+
+        return {
+          scope: folder,
+          scanned: summaries.length,
+          matched: results.length,
+          truncated: uids.length > candidates.length,
+          criteria: {
+            olderThanDays: olderThanDays ?? null,
+            minSenderCount,
+            includeUnread,
+          },
+          candidates: results,
+        };
+      } finally {
+        lock.release();
+      }
+    });
+  }
+
   async getMessage(id: string): Promise<{
     id: string;
     folder: string;
@@ -877,5 +1120,41 @@ export class ProtonMailbox {
         lock.release();
       }
     });
+  }
+
+  async markRead(input: MessageActionInput) {
+    return this.mutateMessages(input.ids, input.dryRun, "read");
+  }
+
+  async markUnread(input: MessageActionInput) {
+    return this.mutateMessages(input.ids, input.dryRun, "unread");
+  }
+
+  async archiveMessages(input: MessageActionInput) {
+    return this.mutateMessages(input.ids, input.dryRun, "archive");
+  }
+
+  async trashMessages(input: MessageActionInput) {
+    return this.mutateMessages(input.ids, input.dryRun, "trash");
+  }
+
+  async moveMessages(input: MoveMessagesInput) {
+    if (!input.destination.trim()) throw new Error("destination is required");
+    return this.mutateMessages(
+      input.ids,
+      input.dryRun,
+      "move",
+      input.destination.trim(),
+    );
+  }
+
+  async copyMessages(input: MoveMessagesInput) {
+    if (!input.destination.trim()) throw new Error("destination is required");
+    return this.mutateMessages(
+      input.ids,
+      input.dryRun,
+      "copy",
+      input.destination.trim(),
+    );
   }
 }

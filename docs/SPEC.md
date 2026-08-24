@@ -234,6 +234,36 @@ Rules:
 - Avoid returning duplicate HTML and text when doing so materially increases output size; the implementation should prefer a useful text representation.
 - Apply a documented maximum body/output size and signal truncation rather than returning unbounded content.
 
-## Future write contract
+## `cleanup_candidates`
 
-`v0.2` may add reversible operations such as archive, move, trash, and read/unread. Those tools are intentionally not part of this contract yet.
+Returns bounded metadata-only messages that may be useful for cleanup review.
+By default it excludes unread messages and identifies messages from senders that
+occur at least 10 times in the scanned sample. `olderThanDays` adds an `old_read`
+reason for read messages older than the requested age. `includeUnread` can widen
+the scan, but the result remains a suggestion and never mutates mail.
+
+The result includes `matched`, `scanned`, `truncated`, the effective criteria,
+and message summaries with `reasons`. It is intentionally not a delete or
+archive command.
+
+## Controlled write tools
+
+The controlled write tools accept `ids` from a previous search result and an
+optional `dryRun` flag. `ids` must contain 1-50 unique opaque ids from one
+source folder. The service validates mailbox UIDVALIDITY and confirms that all
+selected messages still exist before changing mail.
+
+`mark_read`, `mark_unread`, `archive_messages`, and `trash_messages` accept:
+
+```json
+{
+  "ids": ["opaque-message-id"],
+  "dryRun": true
+}
+```
+
+`move_messages` and `copy_messages` additionally require a destination folder or
+label path. Archive and trash resolve Proton's special-use folders through
+Bridge. All operations return the action, requested count, affected count, and
+source folders. Permanent deletion, arbitrary IMAP commands, and query-based
+mutation are out of scope.

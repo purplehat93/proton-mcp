@@ -19,8 +19,14 @@ A self-hosted Model Context Protocol (MCP) server for Proton Mail, designed to r
 - `mailbox_stats`
 - `top_senders`
 - `mailbox_inventory`
+- `cleanup_candidates`
 - `search_mail`
 - `get_message`
+
+Controlled management tools are also available for bounded, explicit-id
+operations: `mark_read`, `mark_unread`, `archive_messages`, `move_messages`,
+`copy_messages`, and `trash_messages`. They support `dryRun`; permanent deletion
+is not exposed.
 
 See [`docs/SPEC.md`](docs/SPEC.md) for the tool contract and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the deployment model.
 
