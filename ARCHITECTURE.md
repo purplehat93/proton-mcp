@@ -130,6 +130,14 @@ UIDPLUS source-to-destination mapping. Only those records can be undone through
 `undo_cleanup_operation`; copies and operations without a complete mapping are
 not presented as reversible.
 
+### Manual automation rules
+
+Automation rules are persisted in the same private state file as cleanup plans.
+They match bounded mailbox metadata and are disabled by default. A rule has no
+background scheduler: `prepare_automation_run` evaluates it manually and creates
+the existing confirmation plan from the exact current message ids. Rule-run
+history records no-match, pending-confirmation, applied, and needs-review states.
+
 ## Non-goals
 
 - Reimplementing Proton Mail Bridge.

@@ -83,6 +83,24 @@ const cleanupPlanSchema = z.object({
   destination: z.string().min(1).optional(),
 });
 
+const automationMatchSchema = z.object({
+  folder: z.string().min(1),
+  from: z.string().min(1).optional(),
+  to: z.string().min(1).optional(),
+  subject: z.string().min(1).optional(),
+  before: z.string().datetime().optional(),
+  after: z.string().datetime().optional(),
+  seen: z.boolean().optional(),
+  hasAttachments: z.boolean().optional(),
+});
+
+const automationRuleSchema = z.object({
+  name: z.string().min(1).max(120),
+  action: z.enum(["read", "unread", "archive", "trash", "move"]),
+  destination: z.string().min(1).optional(),
+  match: automationMatchSchema,
+});
+
 export function createServer(): McpServer {
   const mailbox = new ProtonMailbox();
   const cleanupState = new CleanupStateStore();
@@ -340,6 +358,160 @@ export function createServer(): McpServer {
             withoutUndefined(input) as ReceiptCandidatesInput,
           ),
         );
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "create_automation_rule",
+    {
+      title: "Create a manual mailbox automation rule",
+      description:
+        "Store a disabled-by-default rule with bounded metadata filters. Rules never run in the background; use prepare_automation_run to evaluate one manually.",
+      inputSchema: automationRuleSchema,
+      annotations: cleanupPlanAnnotations,
+    },
+    async ({ name, action, destination, match }) => {
+      try {
+        if ((action === "move") !== Boolean(destination?.trim())) {
+          throw new Error("destination is required only for move rules");
+        }
+        if (
+          match.from === undefined &&
+          match.to === undefined &&
+          match.subject === undefined &&
+          match.before === undefined &&
+          match.after === undefined &&
+          match.seen === undefined &&
+          match.hasAttachments === undefined
+        ) {
+          throw new Error(
+            "automation rules require at least one match criterion",
+          );
+        }
+        return success({
+          rule: await cleanupState.createRule({
+            name: name.trim(),
+            action,
+            enabled: false,
+            ...(destination ? { destination: destination.trim() } : {}),
+            match: {
+              folder: match.folder,
+              ...(match.from ? { from: match.from } : {}),
+              ...(match.to ? { to: match.to } : {}),
+              ...(match.subject ? { subject: match.subject } : {}),
+              ...(match.before ? { before: match.before } : {}),
+              ...(match.after ? { after: match.after } : {}),
+              ...(match.seen !== undefined ? { seen: match.seen } : {}),
+              ...(match.hasAttachments !== undefined
+                ? { hasAttachments: match.hasAttachments }
+                : {}),
+            },
+          }),
+        });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "list_automation_rules",
+    {
+      title: "List manual mailbox automation rules",
+      description:
+        "List persisted automation rules and whether they are enabled. This tool does not inspect or change mail.",
+      inputSchema: z.object({}),
+      annotations: readOnlyAnnotations,
+    },
+    async () => {
+      try {
+        return success({ rules: await cleanupState.listRules() });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "set_automation_rule_enabled",
+    {
+      title: "Enable or disable a manual automation rule",
+      description:
+        "Enable or disable a stored rule. Enabling does not schedule it or change mail.",
+      inputSchema: z.object({
+        ruleId: z.string().uuid(),
+        enabled: z.boolean(),
+      }),
+      annotations: cleanupPlanAnnotations,
+    },
+    async ({ ruleId, enabled }) => {
+      try {
+        return success({
+          rule: await cleanupState.setRuleEnabled(ruleId, enabled),
+        });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "prepare_automation_run",
+    {
+      title: "Evaluate a rule and prepare a confirmed run",
+      description:
+        "Manually evaluate one enabled rule against up to 50 messages. Returns metadata candidates and, when matches exist, the same 15-minute one-time cleanup plan used for manual batches. It does not change mail.",
+      inputSchema: z.object({
+        ruleId: z.string().uuid(),
+        limit: z.number().int().min(1).max(50).optional(),
+      }),
+      annotations: cleanupPlanAnnotations,
+    },
+    async ({ ruleId, limit }) => {
+      try {
+        const rule = await cleanupState.getRule(ruleId);
+        const result = await mailbox.searchMail({
+          ...rule.match,
+          limit: limit ?? 50,
+        });
+        const prepared = await cleanupState.createRuleRun(
+          rule.id,
+          result.messages.map((message) => message.id),
+          rule.match.folder,
+        );
+        return success({
+          rule,
+          candidates: result.messages,
+          truncated: result.truncated,
+          scanned: result.scanned,
+          ...prepared,
+        });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "automation_history",
+    {
+      title: "List manual automation run history",
+      description:
+        "List bounded rule evaluation and confirmation-run history without returning message bodies.",
+      inputSchema: z.object({
+        ruleId: z.string().uuid().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+      }),
+      annotations: readOnlyAnnotations,
+    },
+    async ({ ruleId, limit }) => {
+      try {
+        return success({
+          runs: await cleanupState.listRuleRuns(ruleId, limit),
+        });
       } catch (error) {
         return failure(error);
       }

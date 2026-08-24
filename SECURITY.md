@@ -53,6 +53,11 @@ single-use and expire after 15 minutes. An interrupted apply or undo is marked
 `needs_review` and is never retried automatically. Undo is exposed only when
 Bridge returns a complete UIDPLUS mapping, so destination UIDs are never guessed.
 
+Automation rules are metadata-only, disabled by default, and have no scheduler
+or background worker. Each manual evaluation is bounded to 50 messages and must
+create a separate one-time cleanup plan before a mail mutation can occur. Rules
+cannot use full-body text matching or permanent deletion.
+
 ## Reporting vulnerabilities
 
 Do not include real mailbox contents, credentials, tokens, or Bridge state in public issues. Describe the reproduction with synthetic data and redact sensitive logs.

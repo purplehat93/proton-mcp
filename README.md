@@ -37,6 +37,11 @@ confirmation token. `cleanup_history` and `undo_cleanup_operation` are available
 only for completed operations; undo is offered only when Bridge returns exact
 destination UID mappings.
 
+Manual automation rules are available through `create_automation_rule`,
+`prepare_automation_run`, and `automation_history`. Rules are disabled by
+default, never run on a schedule, and prepare a reviewable cleanup plan rather
+than changing mail directly.
+
 See [`docs/SPEC.md`](docs/SPEC.md) for the tool contract and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the deployment model.
 
 ## Transports

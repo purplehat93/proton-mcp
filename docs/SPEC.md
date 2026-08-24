@@ -292,6 +292,20 @@ when Bridge supplies a complete UIDPLUS mapping. `undo_cleanup_operation` moves
 only those exact destination ids back to their recorded source folder. Copy,
 flag changes, and unmapped moves are intentionally not undoable.
 
+## Manual automation rules
+
+`create_automation_rule` stores a disabled-by-default rule. It requires a folder
+and at least one additional metadata criterion (`from`, `to`, `subject`, date,
+seen state, or attachment state). Supported actions are read, unread, archive,
+trash, and move; only move requires a destination.
+
+`prepare_automation_run` manually evaluates one enabled rule against at most 50
+messages, returns candidate metadata, and creates a standard one-time cleanup
+plan when matches exist. It never changes mail itself. `automation_history`
+returns no-match, pending-confirmation, applied, and needs-review run records.
+There is no schedule, background execution, full-body matching, or permanent
+deletion.
+
 `mark_read`, `mark_unread`, `archive_messages`, and `trash_messages` accept:
 
 ```json
