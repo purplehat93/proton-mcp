@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   ProtonMailbox,
+  type MailboxInventoryInput,
   type SearchMailInput,
   type TopSendersInput,
 } from "./mail.js";
@@ -107,6 +108,31 @@ export function createServer(): McpServer {
       try {
         const request = withoutUndefined(input) as TopSendersInput;
         return success(await mailbox.topSenders(request));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "mailbox_inventory",
+    {
+      title: "Inventory Proton Mail metadata",
+      description:
+        "Build a bounded read-only mailbox inventory from message metadata. Returns exact match count plus sampled sender, domain, date, unread, attachment, and size aggregates; never returns message bodies.",
+      inputSchema: z.object({
+        folder: z.string().min(1).optional(),
+        before: z.string().datetime().optional(),
+        after: z.string().datetime().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+        scanLimit: z.number().int().min(1).max(5000).optional(),
+      }),
+      annotations: readOnlyAnnotations,
+    },
+    async (input) => {
+      try {
+        const request = withoutUndefined(input) as MailboxInventoryInput;
+        return success(await mailbox.mailboxInventory(request));
       } catch (error) {
         return failure(error);
       }

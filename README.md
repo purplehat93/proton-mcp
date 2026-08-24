@@ -18,6 +18,7 @@ A self-hosted Model Context Protocol (MCP) server for Proton Mail, designed to r
 - `list_folders`
 - `mailbox_stats`
 - `top_senders`
+- `mailbox_inventory`
 - `search_mail`
 - `get_message`
 

@@ -157,6 +157,33 @@ Rules:
 - Return newest-first unless the implementation documents an explicit sort option.
 - Do not return full bodies.
 
+## `mailbox_inventory`
+
+Builds a bounded metadata inventory for one folder.
+
+Input:
+
+```json
+{
+  "folder": "Inbox",
+  "before": "2025-01-01T00:00:00Z",
+  "after": null,
+  "limit": 50,
+  "scanLimit": 5000
+}
+```
+
+Rules:
+
+- `folder`, `before`, `after`, `limit`, and `scanLimit` are optional.
+- `scanLimit` defaults to 5000 and cannot exceed 5000.
+- The result includes the exact number of matching UIDs, but aggregates only the bounded sample.
+- The scan fetches metadata only: envelopes, dates, flags, sizes, and attachment structure.
+- No message bodies, attachment contents, or mailbox mutations are performed.
+
+Output includes sampled unread/seen/attachment/size totals, date range, monthly
+counts, top senders, and top sender domains, plus `truncated` metadata.
+
 Output:
 
 ```json
