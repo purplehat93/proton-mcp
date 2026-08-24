@@ -23,6 +23,7 @@ A self-hosted Model Context Protocol (MCP) server for Proton Mail, designed to r
 - `mailbox_analysis`
 - `search_mail`
 - `get_message`
+- `extract_receipt`
 
 Controlled management tools are also available for bounded, explicit-id
 operations: `mark_read`, `mark_unread`, `archive_messages`, `move_messages`,

@@ -279,6 +279,26 @@ export function createServer(): McpServer {
   );
 
   server.registerTool(
+    "extract_receipt",
+    {
+      title: "Extract receipt or purchase details",
+      description:
+        "Inspect one explicitly selected message using bounded text/HTML retrieval and extract receipt signals, merchant, order reference, and currency amounts. This is a heuristic and never changes mail.",
+      inputSchema: z.object({
+        id: z.string().min(1),
+      }),
+      annotations: readOnlyAnnotations,
+    },
+    async ({ id }) => {
+      try {
+        return success(await mailbox.extractReceipt(id));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
     "mark_read",
     {
       title: "Mark Proton Mail messages read",

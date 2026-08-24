@@ -234,6 +234,13 @@ Rules:
 - Avoid returning duplicate HTML and text when doing so materially increases output size; the implementation should prefer a useful text representation.
 - Apply a documented maximum body/output size and signal truncation rather than returning unbounded content.
 
+## `extract_receipt`
+
+Inspects one opaque message id using the same bounded text/HTML retrieval as
+`get_message`. It returns heuristic receipt signals, merchant, order reference,
+currency amounts, and attachment metadata. It never downloads attachment bytes
+or changes mail; callers must treat the result as a review aid.
+
 ## `cleanup_candidates`
 
 Returns bounded metadata-only messages that may be useful for cleanup review.

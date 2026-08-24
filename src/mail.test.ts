@@ -8,6 +8,7 @@ import {
   ProtonMailbox,
   decodeMessageId,
   encodeMessageId,
+  extractReceiptDetails,
   loadImapConfig,
   parseInventoryScanLimit,
 } from "./mail.js";
@@ -86,6 +87,27 @@ describe("mailbox inventory bounds", () => {
     expect(parseInventoryScanLimit(5000)).toBe(5000);
     expect(() => parseInventoryScanLimit(0)).toThrow(/scanLimit/);
     expect(() => parseInventoryScanLimit(5001)).toThrow(/scanLimit/);
+  });
+});
+
+describe("receipt extraction", () => {
+  it("extracts bounded receipt details from message content", () => {
+    expect(
+      extractReceiptDetails({
+        from: [{ name: "Example Shop", address: "orders@example.test" }],
+        subject: "Your order confirmation",
+        receivedAt: "2026-08-24T12:00:00.000Z",
+        text: "Order number: ABCD-1234. Total paid: EUR 19.99.",
+        html: null,
+        bodyTruncated: false,
+      }),
+    ).toMatchObject({
+      isReceipt: true,
+      confidence: "high",
+      merchant: "Example Shop",
+      orderNumber: "ABCD-1234",
+      amounts: [{ value: "19.99", currency: "EUR" }],
+    });
   });
 });
 
