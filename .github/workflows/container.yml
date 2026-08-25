@@ -235,6 +235,7 @@ jobs:
         if: env.DISCORD_WEBHOOK_URL != '' && (needs.build-scan.result == 'failure' || needs.publish.result == 'failure' || needs.publish.result == 'success')
         env:
           TITLE: "${{ needs.publish.result == 'success' && 'Proton MCP container published' || 'Proton MCP container workflow failed' }}"
+          DESCRIPTION: "${{ needs.publish.result == 'success' && 'A validated image is available in GHCR.' || 'The image build or publish pipeline failed.' }}"
           COLOR: "${{ needs.publish.result == 'success' && '3066993' || '15158332' }}"
           STATUS: "${{ needs.publish.result == 'success' && 'Published' || 'Failed' }}"
           REPOSITORY: ${{ github.repository }}
@@ -245,13 +246,15 @@ jobs:
           set -euo pipefail
           jq -n \
             --arg title "$TITLE" \
+            --arg description "$DESCRIPTION" \
             --arg color "$COLOR" \
             --arg status "$STATUS" \
             --arg repository "$REPOSITORY" \
             --arg branch "$BRANCH" \
             --arg commit "$COMMIT" \
             --arg url "$RUN_URL" \
-            '{username:"CI Alerts",embeds:[{title:$title,url:$url,color:($color|tonumber),fields:[{name:"Status",value:$status,inline:true},{name:"Repository",value:$repository,inline:true},{name:"Branch",value:$branch,inline:true},{name:"Commit",value:($commit|.[0:7]),inline:true}],footer:{text:"GitHub Actions"}}]}' |
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{embeds:[{title:$title,description:$description,url:$url,color:($color|tonumber),fields:[{name:"Status",value:$status,inline:true},{name:"Repository",value:$repository,inline:true},{name:"Branch",value:$branch,inline:true},{name:"Commit",value:($commit|.[0:7]),inline:true}],timestamp:$timestamp,footer:{text:"GitHub Actions"}}]}' |
             curl --fail-with-body --silent --show-error \
               -H 'Content-Type: application/json' \
               --data-binary @- "$DISCORD_WEBHOOK_URL"
