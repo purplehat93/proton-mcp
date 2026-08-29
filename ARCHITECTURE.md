@@ -139,12 +139,20 @@ background scheduler: `prepare_automation_run` evaluates it manually and creates
 the existing confirmation plan from the exact current message ids. Rule-run
 history records no-match, pending-confirmation, applied, and needs-review states.
 
-### Proposed scheduled review runs
+### Scheduled review runs
 
-The next release may add interval-based rule evaluation in the HTTP service.
-Scheduled runs must only record bounded `pending_review` candidates; they must
-not create confirmation tokens or change mail. A separate explicit client action
-will remain necessary to prepare and apply a cleanup plan.
+The HTTP service supports interval-based rule evaluation. Scheduled runs only
+record bounded `pending_review` candidates; they do not create confirmation
+tokens or change mail. A separate explicit client action remains necessary to
+prepare and apply a cleanup plan.
+
+### Review-only bulk cleanup manifests
+
+Bulk review runs scan bounded message metadata, freeze explicit opaque ids in a
+persisted manifest, and record a digest for review. They never fetch message
+bodies, create confirmation tokens, or mutate mail. Bulk execution requires a
+separate reviewed workflow that applies bounded chunks and revalidates the
+manifest before each mutation.
 
 ## Non-goals
 
