@@ -21,6 +21,7 @@ A self-hosted Model Context Protocol (MCP) server for Proton Mail, designed to r
 - `mailbox_inventory`
 - `cleanup_candidates`
 - `mailbox_analysis`
+- `newsletter_review`
 - `search_mail`
 - `get_message`
 - `extract_receipt`
@@ -59,6 +60,8 @@ request and continue a paused run with the same confirmation token. Permanent
 deletion remains unavailable; an unexpected interruption leaves the run for
 manual review rather than retrying an uncertain chunk.
 Bulk reviews support protected sender, domain, and subject-term exclusions.
+`newsletter_review` groups standard `List-Unsubscribe` headers by sender and
+reports mailto/HTTPS options for review; it never sends unsubscribe requests.
 
 See [`docs/SPEC.md`](docs/SPEC.md) for the tool contract and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the deployment model.
 

@@ -42,6 +42,23 @@ function withoutUndefined<T extends Record<string, unknown>>(
   ) as Partial<T>;
 }
 
+function unsubscribeMethods(value: string | null): {
+  mailto: string[];
+  https: string[];
+} {
+  const methods = { mailto: [], https: [] } as {
+    mailto: string[];
+    https: string[];
+  };
+  for (const match of value?.matchAll(/<([^>]+)>/g) ?? []) {
+    const method = match[1];
+    if (!method) continue;
+    if (method.startsWith("mailto:")) methods.mailto.push(method);
+    if (method.startsWith("https://")) methods.https.push(method);
+  }
+  return methods;
+}
+
 const readOnlyAnnotations = {
   readOnlyHint: true,
   destructiveHint: false,
@@ -568,6 +585,88 @@ export function createServer(): McpServer {
       try {
         const request = withoutUndefined(input) as MailboxAnalysisInput;
         return success(await mailbox.mailboxAnalysis(request));
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "newsletter_review",
+    {
+      title: "Review newsletter unsubscribe options",
+      description:
+        "Find newsletter senders and summarize standard List-Unsubscribe methods. This is review-only: it never sends unsubscribe requests or changes mail.",
+      inputSchema: z.object({
+        folder: z.string().min(1).optional(),
+        before: z.string().datetime().optional(),
+        after: z.string().datetime().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+      }),
+      annotations: readOnlyAnnotations,
+    },
+    async (input) => {
+      try {
+        const analysis = await mailbox.mailboxAnalysis(
+          withoutUndefined(input) as MailboxAnalysisInput,
+        );
+        const senders = new Map<
+          string,
+          {
+            sender: (typeof analysis.newsletterCandidates)[number]["sender"];
+            messageCount: number;
+            latestAt: string | null;
+            listIds: Set<string>;
+            mailto: Set<string>;
+            https: Set<string>;
+            sampleSubjects: string[];
+          }
+        >();
+        for (const candidate of analysis.newsletterCandidates) {
+          const key =
+            candidate.sender.address?.toLowerCase() ??
+            candidate.sender.name ??
+            "unknown";
+          const current = senders.get(key) ?? {
+            sender: candidate.sender,
+            messageCount: 0,
+            latestAt: null,
+            listIds: new Set<string>(),
+            mailto: new Set<string>(),
+            https: new Set<string>(),
+            sampleSubjects: [],
+          };
+          current.messageCount += 1;
+          if ((candidate.receivedAt ?? "") > (current.latestAt ?? "")) {
+            current.latestAt = candidate.receivedAt;
+          }
+          if (candidate.listId) current.listIds.add(candidate.listId);
+          const methods = unsubscribeMethods(candidate.listUnsubscribe);
+          methods.mailto.forEach((method) => current.mailto.add(method));
+          methods.https.forEach((method) => current.https.add(method));
+          if (candidate.subject && current.sampleSubjects.length < 3) {
+            current.sampleSubjects.push(candidate.subject);
+          }
+          senders.set(key, current);
+        }
+        return success({
+          scope: analysis.scope,
+          scanned: analysis.scanned,
+          truncated: analysis.truncated,
+          senders: [...senders.values()]
+            .sort((a, b) => b.messageCount - a.messageCount)
+            .map((sender) => ({
+              sender: sender.sender,
+              messageCount: sender.messageCount,
+              latestAt: sender.latestAt,
+              listIds: [...sender.listIds],
+              unsubscribe: {
+                mailto: [...sender.mailto],
+                https: [...sender.https],
+              },
+              sampleSubjects: sender.sampleSubjects,
+            })),
+        });
       } catch (error) {
         return failure(error);
       }
