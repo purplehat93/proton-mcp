@@ -296,6 +296,19 @@ export class CleanupStateStore {
     return run;
   }
 
+  async pauseBulkRun(id: string): Promise<BulkCleanupRun> {
+    let run!: BulkCleanupRun;
+    await this.mutate((state) => {
+      run = state.bulkRuns.find((item) => item.id === id)!;
+      if (!run) throw new Error("Bulk cleanup run not found");
+      if (run.status !== "in_progress") {
+        throw new Error(`Bulk cleanup run is ${run.status}`);
+      }
+      run.status = "approved";
+    });
+    return run;
+  }
+
   async flagBulkRunForReview(id: string, error?: string): Promise<void> {
     await this.mutate((state) => {
       const run = state.bulkRuns.find((item) => item.id === id);

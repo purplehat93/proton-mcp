@@ -53,8 +53,10 @@ Review-only bulk cleanup manifests can be created with
 `create_bulk_cleanup_run` and inspected with `bulk_cleanup_history`. After
 review, `approve_bulk_cleanup_run` authorizes one run and
 `apply_bulk_cleanup_run` processes it through internal 50-message plans while
-recording progress and operation history. Permanent deletion remains
-unavailable.
+recording progress and operation history. Use `maxChunks` to bound each
+request and continue a paused run with the same confirmation token. Permanent
+deletion remains unavailable; an unexpected interruption leaves the run for
+manual review rather than retrying an uncertain chunk.
 
 See [`docs/SPEC.md`](docs/SPEC.md) for the tool contract and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the deployment model.
 

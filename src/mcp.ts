@@ -126,6 +126,7 @@ const bulkRunIdSchema = z.object({
 
 const bulkApplySchema = bulkRunIdSchema.extend({
   confirmationToken: z.string().min(1),
+  maxChunks: z.number().int().min(1).max(50).optional(),
 });
 
 const BULK_MUTATION_CHUNK_SIZE = 50;
@@ -149,6 +150,7 @@ function bulkRunSummary(run: {
 export function createServer(): McpServer {
   const mailbox = new ProtonMailbox();
   const cleanupState = new CleanupStateStore();
+  const activeBulkRuns = new Set<string>();
   const server = new McpServer(
     {
       name: "proton-mcp",
@@ -266,15 +268,19 @@ export function createServer(): McpServer {
       inputSchema: bulkApplySchema,
       annotations: plannedMutationAnnotations,
     },
-    async ({ runId, confirmationToken }) => {
+    async ({ runId, confirmationToken, maxChunks = 10 }) => {
       try {
+        if (activeBulkRuns.has(runId)) {
+          throw new Error("Bulk cleanup run is already being applied");
+        }
+        activeBulkRuns.add(runId);
         const run = await cleanupState.claimBulkRun(runId, confirmationToken);
         let affected = 0;
         let chunks = 0;
         try {
           for (
             let offset = run.completedCount;
-            offset < run.candidateIds.length;
+            offset < run.candidateIds.length && chunks < maxChunks;
             offset += BULK_MUTATION_CHUNK_SIZE
           ) {
             const ids = run.candidateIds.slice(
@@ -338,7 +344,11 @@ export function createServer(): McpServer {
           const completed =
             run.candidateIds.length === 0
               ? await cleanupState.advanceBulkRun(run.id, 0)
-              : await cleanupState.getBulkRun(run.id);
+              : chunks >= maxChunks &&
+                  run.completedCount + chunks * BULK_MUTATION_CHUNK_SIZE <
+                    run.candidateIds.length
+                ? await cleanupState.pauseBulkRun(run.id)
+                : await cleanupState.getBulkRun(run.id);
           return success({
             run: bulkRunSummary(completed),
             requested: run.candidateIds.length,
@@ -351,8 +361,11 @@ export function createServer(): McpServer {
             error instanceof Error ? error.message : "Bulk cleanup failed",
           );
           throw error;
+        } finally {
+          activeBulkRuns.delete(runId);
         }
       } catch (error) {
+        activeBulkRuns.delete(runId);
         return failure(error);
       }
     },

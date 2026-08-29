@@ -95,6 +95,27 @@ describe("cleanup workflow state", () => {
     });
   });
 
+  it("allows a paused approved run to continue from persisted progress", async () => {
+    const store = await stateStore();
+    const run = await store.createBulkRun({
+      action: "trash",
+      sourceFolder: "INBOX",
+      criteria: { seen: true },
+      candidateIds: ["message-1", "message-2"],
+      manifestDigest: "digest",
+    });
+    const approval = await store.approveBulkRun(run.id);
+    await store.claimBulkRun(run.id, approval.confirmationToken);
+    await store.advanceBulkRun(run.id, 1);
+    await expect(store.pauseBulkRun(run.id)).resolves.toMatchObject({
+      status: "approved",
+      completedCount: 1,
+    });
+    await expect(
+      store.claimBulkRun(run.id, approval.confirmationToken),
+    ).resolves.toMatchObject({ status: "in_progress", completedCount: 1 });
+  });
+
   it("returns a one-time token without exposing its stored hash", async () => {
     const store = await stateStore();
     const plan = await store.createPlan({
