@@ -311,8 +311,9 @@ trash, and move; only move requires a destination.
 messages, returns candidate metadata, and creates a standard one-time cleanup
 plan when matches exist. It never changes mail itself. `automation_history`
 returns no-match, pending-confirmation, applied, and needs-review run records.
-There is no schedule, background execution, full-body matching, or permanent
-deletion.
+There is no background mailbox mutation, full-body matching, or permanent
+deletion. Optional schedules only create bounded `pending_review` history and
+never create confirmation tokens or apply plans.
 
 `update_automation_rule` replaces a disabled rule. `delete_automation_rule`
 requires a disabled rule, cancels any unused confirmation plan it created, and
