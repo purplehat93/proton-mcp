@@ -21,6 +21,19 @@ const MAX_SENDER_SCAN = 5000;
 const MAX_INVENTORY_SCAN = 5000;
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_MUTATION_BATCH = 50;
+export const MAX_BULK_SCAN = 12_000;
+
+export function parseBulkScanLimit(value: number | undefined): number {
+  const scanLimit = value ?? MAX_BULK_SCAN;
+  if (
+    !Number.isInteger(scanLimit) ||
+    scanLimit < 1 ||
+    scanLimit > MAX_BULK_SCAN
+  ) {
+    throw new Error(`scanLimit must be between 1 and ${MAX_BULK_SCAN}`);
+  }
+  return scanLimit;
+}
 const MAX_ANALYSIS_SCAN = 500;
 
 export type ImapSecurity = "STARTTLS" | "SSL" | "NONE";
@@ -78,6 +91,10 @@ export type CleanupCandidatesInput = SearchMailInput & {
   olderThanDays?: number;
   minSenderCount?: number;
   includeUnread?: boolean;
+  scanLimit?: number;
+};
+
+export type BulkSearchInput = SearchMailInput & {
   scanLimit?: number;
 };
 
@@ -629,6 +646,36 @@ async function downloadTextPart(
 }
 
 export class ProtonMailbox {
+  async searchBulk(input: BulkSearchInput): Promise<{
+    messages: MessageSummary[];
+    scanned: number;
+    truncated: boolean;
+  }> {
+    const folder = input.folder ?? "INBOX";
+    const scanLimit = parseBulkScanLimit(input.scanLimit);
+
+    return withClient(async (client) => {
+      const lock = await client.getMailboxLock(folder, {
+        readOnly: true,
+        acquireTimeout: 10_000,
+      });
+      try {
+        const found = await client.search(buildSearchQuery(input), {
+          uid: true,
+        });
+        const uids = Array.isArray(found) ? found : [];
+        const candidates = uids.slice(-scanLimit);
+        return {
+          messages: await fetchSummaries(client, folder, candidates),
+          scanned: candidates.length,
+          truncated: uids.length > candidates.length,
+        };
+      } finally {
+        lock.release();
+      }
+    });
+  }
+
   private async mutateMessages(
     ids: string[],
     dryRun: boolean | undefined,

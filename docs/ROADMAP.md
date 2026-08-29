@@ -9,6 +9,8 @@
   mappings.
 - Disabled-by-default manual automation rules, manual review runs, and rule
   lifecycle management.
+- Review-only bulk cleanup manifests with bounded metadata scans and persisted
+  candidate digests. Bulk mutation and resume execution remain pending.
 
 ## Live-validated
 

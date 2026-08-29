@@ -2,8 +2,10 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import {
+  MAX_BULK_SCAN,
   ProtonMailbox,
   decodeMessageId,
+  type BulkSearchInput,
   type CleanupCandidatesInput,
   type MailboxAnalysisInput,
   type MailboxInventoryInput,
@@ -14,6 +16,7 @@ import {
   type TopSendersInput,
 } from "./mail.js";
 import { CleanupStateStore } from "./state.js";
+import { createHash } from "node:crypto";
 
 function success(output: Record<string, unknown>) {
   return {
@@ -102,6 +105,25 @@ const automationRuleSchema = z.object({
   match: automationMatchSchema,
 });
 
+const bulkCleanupSchema = z.object({
+  action: z.enum(["read", "unread", "archive", "trash", "move", "copy"]),
+  destination: z.string().trim().min(1).optional(),
+  folder: z.string().min(1).optional(),
+  from: z.string().min(1).optional(),
+  to: z.string().min(1).optional(),
+  subject: z.string().min(1).optional(),
+  text: z.string().min(1).optional(),
+  before: z.string().datetime().optional(),
+  after: z.string().datetime().optional(),
+  seen: z.boolean().optional(),
+  hasAttachments: z.boolean().optional(),
+  scanLimit: z.number().int().min(1).max(MAX_BULK_SCAN).optional(),
+});
+
+function bulkManifestDigest(ids: string[]): string {
+  return createHash("sha256").update(ids.join("\n")).digest("hex");
+}
+
 export function createServer(): McpServer {
   const mailbox = new ProtonMailbox();
   const cleanupState = new CleanupStateStore();
@@ -113,6 +135,85 @@ export function createServer(): McpServer {
     {
       instructions:
         "Proton Mail access via Proton Mail Bridge. Prefer metadata/search tools before fetching individual message bodies. Message ids are opaque and should be passed unchanged to get_message or explicit bounded write tools. Write tools support dryRun and never permanently delete messages.",
+    },
+  );
+
+  server.registerTool(
+    "create_bulk_cleanup_run",
+    {
+      title: "Create a review-only bulk cleanup run",
+      description:
+        "Scan up to 12,000 metadata-only messages, freeze the explicit candidate ids, and persist a reviewable bulk run. This tool never changes mail.",
+      inputSchema: bulkCleanupSchema,
+      annotations: cleanupPlanAnnotations,
+    },
+    async (input) => {
+      try {
+        if (
+          (input.action === "move" || input.action === "copy") !==
+          Boolean(input.destination)
+        ) {
+          throw new Error(
+            "destination is required only for move and copy runs",
+          );
+        }
+        const searchInput = withoutUndefined({
+          folder: input.folder,
+          from: input.from,
+          to: input.to,
+          subject: input.subject,
+          text: input.text,
+          before: input.before,
+          after: input.after,
+          seen: input.seen,
+          hasAttachments: input.hasAttachments,
+          scanLimit: input.scanLimit,
+        }) as BulkSearchInput;
+        const result = await mailbox.searchBulk(searchInput);
+        const ids = result.messages.map((message) => message.id);
+        const run = await cleanupState.createBulkRun({
+          action: input.action,
+          sourceFolder: input.folder ?? "INBOX",
+          ...(input.destination ? { destination: input.destination } : {}),
+          criteria: searchInput,
+          candidateIds: ids,
+          manifestDigest: bulkManifestDigest(ids),
+        });
+        const runSummary = Object.fromEntries(
+          Object.entries(run).filter(([key]) => key !== "candidateIds"),
+        );
+        return success({
+          run: runSummary,
+          review: {
+            matched: ids.length,
+            scanned: result.scanned,
+            truncated: result.truncated,
+            sample: result.messages.slice(0, 20),
+          },
+        });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "bulk_cleanup_history",
+    {
+      title: "List bulk cleanup runs",
+      description:
+        "List persisted review-only bulk cleanup runs without returning message bodies.",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(100).optional(),
+      }),
+      annotations: readOnlyAnnotations,
+    },
+    async ({ limit }) => {
+      try {
+        return success({ runs: await cleanupState.listBulkRuns(limit) });
+      } catch (error) {
+        return failure(error);
+      }
     },
   );
 

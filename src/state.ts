@@ -5,6 +5,7 @@ import { join } from "node:path";
 const DEFAULT_STATE_DIR = "/var/lib/proton-mcp";
 const STATE_FILE = "cleanup-state.json";
 const PLAN_TTL_MS = 15 * 60 * 1000;
+const BULK_RUN_TTL_MS = 24 * 60 * 60 * 1000;
 
 export type CleanupAction =
   "read" | "unread" | "archive" | "trash" | "move" | "copy";
@@ -78,12 +79,29 @@ export type CleanupOperation = {
   undoneAt?: string;
 };
 
+export type BulkCleanupRun = {
+  id: string;
+  action: CleanupAction;
+  sourceFolder: string;
+  destination?: string;
+  criteria: Record<string, unknown>;
+  candidateIds: string[];
+  candidateCount: number;
+  manifestDigest: string;
+  createdAt: string;
+  expiresAt: string;
+  status: "pending_review" | "cancelled";
+};
+
+export type BulkCleanupRunSummary = Omit<BulkCleanupRun, "candidateIds">;
+
 type StateDocument = {
   version: 1;
   plans: StoredPlan[];
   operations: CleanupOperation[];
   rules: AutomationRule[];
   ruleRuns: AutomationRun[];
+  bulkRuns: BulkCleanupRun[];
 };
 
 function tokenHash(token: string): string {
@@ -133,6 +151,51 @@ export class CleanupStateStore {
       status: plan.status,
       confirmationToken,
     };
+  }
+
+  async createBulkRun(input: {
+    action: CleanupAction;
+    sourceFolder: string;
+    destination?: string;
+    criteria: Record<string, unknown>;
+    candidateIds: string[];
+    manifestDigest: string;
+  }): Promise<BulkCleanupRun> {
+    const now = new Date();
+    const run: BulkCleanupRun = {
+      ...input,
+      id: randomUUID(),
+      candidateCount: input.candidateIds.length,
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + BULK_RUN_TTL_MS).toISOString(),
+      status: "pending_review",
+    };
+    await this.mutate((state) => {
+      state.bulkRuns = state.bulkRuns.filter(
+        (item) => item.expiresAt > now.toISOString(),
+      );
+      state.bulkRuns.push(run);
+    });
+    return run;
+  }
+
+  async getBulkRun(id: string): Promise<BulkCleanupRun> {
+    const run = (await this.read()).bulkRuns.find((item) => item.id === id);
+    if (!run) throw new Error("Bulk cleanup run not found");
+    return run;
+  }
+
+  async listBulkRuns(limit = 20): Promise<BulkCleanupRunSummary[]> {
+    return (await this.read()).bulkRuns
+      .slice()
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit)
+      .map(
+        (run) =>
+          Object.fromEntries(
+            Object.entries(run).filter(([key]) => key !== "candidateIds"),
+          ) as BulkCleanupRunSummary,
+      );
   }
 
   async claimPlan(id: string, confirmationToken: string): Promise<StoredPlan> {
@@ -485,6 +548,10 @@ export class CleanupStateStore {
             "ruleRuns" in value && Array.isArray(value.ruleRuns)
               ? (value.ruleRuns as AutomationRun[])
               : [],
+          bulkRuns:
+            "bulkRuns" in value && Array.isArray(value.bulkRuns)
+              ? (value.bulkRuns as BulkCleanupRun[])
+              : [],
         };
       }
       throw new Error("Cleanup state file is invalid");
@@ -496,6 +563,7 @@ export class CleanupStateStore {
           operations: [],
           rules: [],
           ruleRuns: [],
+          bulkRuns: [],
         };
       }
       throw error;
