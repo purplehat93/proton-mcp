@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { CleanupStateStore } from "./state.js";
+import { bulkManifestDigest, CleanupStateStore } from "./state.js";
 
 const tempDirs: string[] = [];
 
@@ -30,14 +30,14 @@ describe("cleanup workflow state", () => {
       sourceFolder: "INBOX",
       criteria: { folder: "INBOX", seen: true },
       candidateIds: ["message-1", "message-2"],
-      manifestDigest: "digest",
+      manifestDigest: bulkManifestDigest(["message-1", "message-2"]),
     });
 
     expect(run).toMatchObject({
       action: "archive",
       candidateCount: 2,
       status: "pending_review",
-      manifestDigest: "digest",
+      manifestDigest: bulkManifestDigest(["message-1", "message-2"]),
     });
     const summaries = await store.listBulkRuns();
     expect(summaries).toHaveLength(1);
@@ -53,7 +53,7 @@ describe("cleanup workflow state", () => {
       sourceFolder: "INBOX",
       criteria: { subject: "old" },
       candidateIds: ["message-1"],
-      manifestDigest: "digest",
+      manifestDigest: bulkManifestDigest(["message-1"]),
     });
 
     const approval = await store.approveBulkRun(run.id);
@@ -73,6 +73,19 @@ describe("cleanup workflow state", () => {
     ).resolves.toMatchObject({ status: "in_progress" });
   });
 
+  it("rejects a bulk manifest with a mismatched digest", async () => {
+    const store = await stateStore();
+    await expect(
+      store.createBulkRun({
+        action: "trash",
+        sourceFolder: "INBOX",
+        criteria: { seen: true },
+        candidateIds: ["message-1"],
+        manifestDigest: "not-the-digest",
+      }),
+    ).rejects.toThrow(/manifest digest is invalid/);
+  });
+
   it("tracks bulk progress and completion", async () => {
     const store = await stateStore();
     const run = await store.createBulkRun({
@@ -80,7 +93,7 @@ describe("cleanup workflow state", () => {
       sourceFolder: "INBOX",
       criteria: { seen: true },
       candidateIds: ["message-1", "message-2"],
-      manifestDigest: "digest",
+      manifestDigest: bulkManifestDigest(["message-1", "message-2"]),
     });
     const approval = await store.approveBulkRun(run.id);
     await store.claimBulkRun(run.id, approval.confirmationToken);
@@ -102,7 +115,7 @@ describe("cleanup workflow state", () => {
       sourceFolder: "INBOX",
       criteria: { seen: true },
       candidateIds: ["message-1", "message-2"],
-      manifestDigest: "digest",
+      manifestDigest: bulkManifestDigest(["message-1", "message-2"]),
     });
     const approval = await store.approveBulkRun(run.id);
     await store.claimBulkRun(run.id, approval.confirmationToken);

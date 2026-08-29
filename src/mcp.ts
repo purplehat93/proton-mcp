@@ -16,7 +16,7 @@ import {
   type TopSendersInput,
 } from "./mail.js";
 import { CleanupStateStore } from "./state.js";
-import { createHash } from "node:crypto";
+import { bulkManifestDigest } from "./state.js";
 
 function success(output: Record<string, unknown>) {
   return {
@@ -118,6 +118,9 @@ const bulkCleanupSchema = z.object({
   seen: z.boolean().optional(),
   hasAttachments: z.boolean().optional(),
   scanLimit: z.number().int().min(1).max(MAX_BULK_SCAN).optional(),
+  excludeFrom: z.array(z.string().email()).max(100).optional(),
+  excludeDomains: z.array(z.string().min(1)).max(100).optional(),
+  excludeSubjectTerms: z.array(z.string().min(1)).max(100).optional(),
 });
 
 const bulkRunIdSchema = z.object({
@@ -130,10 +133,6 @@ const bulkApplySchema = bulkRunIdSchema.extend({
 });
 
 const BULK_MUTATION_CHUNK_SIZE = 50;
-
-function bulkManifestDigest(ids: string[]): string {
-  return createHash("sha256").update(ids.join("\n")).digest("hex");
-}
 
 function bulkRunSummary(run: {
   candidateIds: string[];
@@ -192,6 +191,9 @@ export function createServer(): McpServer {
           seen: input.seen,
           hasAttachments: input.hasAttachments,
           scanLimit: input.scanLimit,
+          excludeFrom: input.excludeFrom,
+          excludeDomains: input.excludeDomains,
+          excludeSubjectTerms: input.excludeSubjectTerms,
         }) as BulkSearchInput;
         const result = await mailbox.searchBulk(searchInput);
         const ids = result.messages.map((message) => message.id);
@@ -235,6 +237,26 @@ export function createServer(): McpServer {
     async ({ limit }) => {
       try {
         return success({ runs: await cleanupState.listBulkRuns(limit) });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "bulk_cleanup_progress",
+    {
+      title: "Get bulk cleanup progress",
+      description:
+        "Return progress for one bulk cleanup run without exposing candidate ids, confirmation hashes, or message bodies.",
+      inputSchema: bulkRunIdSchema,
+      annotations: readOnlyAnnotations,
+    },
+    async ({ runId }) => {
+      try {
+        return success({
+          run: bulkRunSummary(await cleanupState.getBulkRun(runId)),
+        });
       } catch (error) {
         return failure(error);
       }

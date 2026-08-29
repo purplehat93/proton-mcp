@@ -288,6 +288,11 @@ chunk. A failed or interrupted chunk is marked for review and is never retried
 automatically. The run may contain up to 12,000 messages; larger mailboxes
 should be processed as multiple manifests. `maxChunks` limits work per request;
 when a run pauses between requests, the same approval token continues it.
+`bulk_cleanup_progress` returns the compact progress view for one run.
+Bulk candidate creation accepts optional exact sender, sender-domain, and
+case-insensitive subject-term exclusions; excluded messages are never placed
+in the manifest. The service verifies the manifest digest before approval and
+execution.
 
 `create_cleanup_plan` accepts an action and 1-50 explicit opaque ids from one
 folder. Move and copy plans require a destination. It returns an immutable plan

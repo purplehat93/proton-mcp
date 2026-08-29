@@ -121,6 +121,10 @@ function tokenHash(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+export function bulkManifestDigest(ids: string[]): string {
+  return createHash("sha256").update(ids.join("\n")).digest("hex");
+}
+
 export class CleanupStateStore {
   private readonly path: string;
   private writeChain = Promise.resolve();
@@ -174,6 +178,9 @@ export class CleanupStateStore {
     candidateIds: string[];
     manifestDigest: string;
   }): Promise<BulkCleanupRun> {
+    if (input.manifestDigest !== bulkManifestDigest(input.candidateIds)) {
+      throw new Error("Bulk cleanup manifest digest is invalid");
+    }
     const now = new Date();
     const run: BulkCleanupRun = {
       ...input,
@@ -231,6 +238,9 @@ export class CleanupStateStore {
       }
       if (run.expiresAt <= new Date().toISOString()) {
         throw new Error("Bulk cleanup run expired");
+      }
+      if (run.manifestDigest !== bulkManifestDigest(run.candidateIds)) {
+        throw new Error("Bulk cleanup manifest digest is invalid");
       }
       const now = new Date().toISOString();
       run.confirmationHash = tokenHash(confirmationToken);

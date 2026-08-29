@@ -27,6 +27,7 @@ A self-hosted Model Context Protocol (MCP) server for Proton Mail, designed to r
 - `receipt_candidates`
 - `create_bulk_cleanup_run`
 - `bulk_cleanup_history`
+- `bulk_cleanup_progress`
 - `approve_bulk_cleanup_run`
 - `apply_bulk_cleanup_run`
 
@@ -57,6 +58,7 @@ recording progress and operation history. Use `maxChunks` to bound each
 request and continue a paused run with the same confirmation token. Permanent
 deletion remains unavailable; an unexpected interruption leaves the run for
 manual review rather than retrying an uncertain chunk.
+Bulk reviews support protected sender, domain, and subject-term exclusions.
 
 See [`docs/SPEC.md`](docs/SPEC.md) for the tool contract and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the deployment model.
 
