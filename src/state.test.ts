@@ -23,6 +23,29 @@ async function stateStore(): Promise<CleanupStateStore> {
 }
 
 describe("cleanup workflow state", () => {
+  it("persists a review-only bulk manifest", async () => {
+    const store = await stateStore();
+    const run = await store.createBulkRun({
+      action: "archive",
+      sourceFolder: "INBOX",
+      criteria: { folder: "INBOX", seen: true },
+      candidateIds: ["message-1", "message-2"],
+      manifestDigest: "digest",
+    });
+
+    expect(run).toMatchObject({
+      action: "archive",
+      candidateCount: 2,
+      status: "pending_review",
+      manifestDigest: "digest",
+    });
+    const summaries = await store.listBulkRuns();
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({ candidateCount: 2 });
+    expect(summaries[0]).not.toHaveProperty("candidateIds");
+    await expect(store.getBulkRun(run.id)).resolves.toEqual(run);
+  });
+
   it("returns a one-time token without exposing its stored hash", async () => {
     const store = await stateStore();
     const plan = await store.createPlan({

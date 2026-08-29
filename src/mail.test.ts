@@ -10,6 +10,7 @@ import {
   encodeMessageId,
   extractReceiptDetails,
   loadImapConfig,
+  parseBulkScanLimit,
   parseInventoryScanLimit,
 } from "./mail.js";
 
@@ -87,6 +88,17 @@ describe("mailbox inventory bounds", () => {
     expect(parseInventoryScanLimit(5000)).toBe(5000);
     expect(() => parseInventoryScanLimit(0)).toThrow(/scanLimit/);
     expect(() => parseInventoryScanLimit(5001)).toThrow(/scanLimit/);
+  });
+});
+
+describe("bulk mailbox scan bounds", () => {
+  it("defaults to and caps the review scan limit", () => {
+    expect(parseBulkScanLimit(undefined)).toBe(12000);
+    expect(parseBulkScanLimit(1)).toBe(1);
+    expect(parseBulkScanLimit(12000)).toBe(12000);
+    expect(() => parseBulkScanLimit(0)).toThrow(/scanLimit/);
+    expect(() => parseBulkScanLimit(12001)).toThrow(/scanLimit/);
+    expect(() => parseBulkScanLimit(1.5)).toThrow(/scanLimit/);
   });
 });
 

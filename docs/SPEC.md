@@ -276,6 +276,14 @@ selected messages still exist before changing mail.
 
 ## Cleanup workflow tools
 
+`create_bulk_cleanup_run` performs a metadata-only scan of up to 12,000
+messages, freezes the matching opaque ids into a persisted manifest, and
+returns a review summary plus a manifest digest. It never changes mail and it
+does not create a confirmation token. `bulk_cleanup_history` lists these
+review-only manifests. Bulk execution is intentionally not part of this
+phase; a later workflow must approve the immutable manifest before applying
+bounded chunks.
+
 `create_cleanup_plan` accepts an action and 1-50 explicit opaque ids from one
 folder. Move and copy plans require a destination. It returns an immutable plan
 id plus a one-time confirmation token; the server stores only the token hash.

@@ -25,6 +25,8 @@ A self-hosted Model Context Protocol (MCP) server for Proton Mail, designed to r
 - `get_message`
 - `extract_receipt`
 - `receipt_candidates`
+- `create_bulk_cleanup_run`
+- `bulk_cleanup_history`
 
 Controlled management tools are also available for bounded, explicit-id
 operations: `mark_read`, `mark_unread`, `archive_messages`, `move_messages`,
@@ -39,13 +41,16 @@ destination UID mappings.
 
 Manual automation rules are available through `create_automation_rule`,
 `prepare_automation_run`, and `automation_history`. Rules are disabled by
-default, never run on a schedule, and prepare a reviewable cleanup plan rather
-than changing mail directly.
+default and prepare a reviewable cleanup plan rather than changing mail
+directly. Optional scheduled reviews only record bounded candidates for later
+review; they do not create confirmation tokens or mutate mail.
 
 Disabled rules can be changed with `update_automation_rule` or removed with
 `delete_automation_rule`, which also cancels any unused plan from that rule.
-The proposed `set_automation_rule_schedule` feature is documented in the
-roadmap; it is not deployed until its review is merged.
+Review-only bulk cleanup manifests can be created with
+`create_bulk_cleanup_run` and inspected with `bulk_cleanup_history`. Bulk
+execution remains intentionally unavailable until an explicit bounded workflow
+has been reviewed.
 
 See [`docs/SPEC.md`](docs/SPEC.md) for the tool contract and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the deployment model.
 
