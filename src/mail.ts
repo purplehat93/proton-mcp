@@ -1319,6 +1319,7 @@ export class ProtonMailbox {
       id: string;
       sender: AddressSummary;
       subject: string | null;
+      receivedAt: string | null;
       listId: string | null;
       listUnsubscribe: string | null;
       reason: string;
@@ -1364,6 +1365,7 @@ export class ProtonMailbox {
           id: string;
           sender: AddressSummary;
           subject: string | null;
+          receivedAt: string | null;
           listId: string | null;
           listUnsubscribe: string | null;
           reason: string;
@@ -1420,6 +1422,7 @@ export class ProtonMailbox {
               id: summary.id,
               sender: summary.from,
               subject: summary.subject,
+              receivedAt: summary.receivedAt,
               listId,
               listUnsubscribe,
               reason: listUnsubscribe
