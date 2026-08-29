@@ -120,8 +120,30 @@ const bulkCleanupSchema = z.object({
   scanLimit: z.number().int().min(1).max(MAX_BULK_SCAN).optional(),
 });
 
+const bulkRunIdSchema = z.object({
+  runId: z.string().uuid(),
+});
+
+const bulkApplySchema = bulkRunIdSchema.extend({
+  confirmationToken: z.string().min(1),
+});
+
+const BULK_MUTATION_CHUNK_SIZE = 50;
+
 function bulkManifestDigest(ids: string[]): string {
   return createHash("sha256").update(ids.join("\n")).digest("hex");
+}
+
+function bulkRunSummary(run: {
+  candidateIds: string[];
+  confirmationHash?: string;
+  [key: string]: unknown;
+}): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(run).filter(
+      ([key]) => key !== "candidateIds" && key !== "confirmationHash",
+    ),
+  );
 }
 
 export function createServer(): McpServer {
@@ -211,6 +233,125 @@ export function createServer(): McpServer {
     async ({ limit }) => {
       try {
         return success({ runs: await cleanupState.listBulkRuns(limit) });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "approve_bulk_cleanup_run",
+    {
+      title: "Approve a bulk cleanup run",
+      description:
+        "Approve one unexpired review-only bulk run and return a one-time token. This does not change mail.",
+      inputSchema: bulkRunIdSchema,
+      annotations: cleanupPlanAnnotations,
+    },
+    async ({ runId }) => {
+      try {
+        return success({ run: await cleanupState.approveBulkRun(runId) });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "apply_bulk_cleanup_run",
+    {
+      title: "Apply an approved bulk cleanup run",
+      description:
+        "Apply one approved bulk cleanup run in 50-message chunks using the existing cleanup-plan safeguards. Permanent deletion is never performed.",
+      inputSchema: bulkApplySchema,
+      annotations: plannedMutationAnnotations,
+    },
+    async ({ runId, confirmationToken }) => {
+      try {
+        const run = await cleanupState.claimBulkRun(runId, confirmationToken);
+        let affected = 0;
+        let chunks = 0;
+        try {
+          for (
+            let offset = run.completedCount;
+            offset < run.candidateIds.length;
+            offset += BULK_MUTATION_CHUNK_SIZE
+          ) {
+            const ids = run.candidateIds.slice(
+              offset,
+              offset + BULK_MUTATION_CHUNK_SIZE,
+            );
+            const plan = await cleanupState.createPlan({
+              action: run.action,
+              ids,
+              sourceFolder: run.sourceFolder,
+              ...(run.destination ? { destination: run.destination } : {}),
+            });
+            const claimedPlan = await cleanupState.claimPlan(
+              plan.id,
+              plan.confirmationToken,
+            );
+            let result;
+            try {
+              const input = { ids: claimedPlan.ids };
+              result =
+                run.action === "read"
+                  ? await mailbox.markRead(input)
+                  : run.action === "unread"
+                    ? await mailbox.markUnread(input)
+                    : run.action === "archive"
+                      ? await mailbox.archiveMessages(input)
+                      : run.action === "trash"
+                        ? await mailbox.trashMessages(input)
+                        : run.action === "move"
+                          ? await mailbox.moveMessages({
+                              ...input,
+                              destination: run.destination!,
+                            })
+                          : await mailbox.copyMessages({
+                              ...input,
+                              destination: run.destination!,
+                            });
+              await cleanupState.completePlan(claimedPlan.id, {
+                action: run.action,
+                sourceFolder: run.sourceFolder,
+                ...(result.destination
+                  ? { destination: result.destination }
+                  : {}),
+                ...(result.undo
+                  ? {
+                      undo: {
+                        sourceFolder: result.undo.sourceFolder,
+                        destinationIds: result.undo.destinationIds,
+                      },
+                    }
+                  : {}),
+              });
+            } catch (error) {
+              await cleanupState.flagPlanForReview(claimedPlan.id);
+              throw error;
+            }
+            affected += result.affected;
+            chunks += 1;
+            await cleanupState.advanceBulkRun(run.id, ids.length);
+          }
+          const completed =
+            run.candidateIds.length === 0
+              ? await cleanupState.advanceBulkRun(run.id, 0)
+              : await cleanupState.getBulkRun(run.id);
+          return success({
+            run: bulkRunSummary(completed),
+            requested: run.candidateIds.length,
+            affected,
+            chunks,
+          });
+        } catch (error) {
+          await cleanupState.flagBulkRunForReview(
+            run.id,
+            error instanceof Error ? error.message : "Bulk cleanup failed",
+          );
+          throw error;
+        }
       } catch (error) {
         return failure(error);
       }

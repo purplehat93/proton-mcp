@@ -87,13 +87,26 @@ export type BulkCleanupRun = {
   criteria: Record<string, unknown>;
   candidateIds: string[];
   candidateCount: number;
+  completedCount: number;
   manifestDigest: string;
   createdAt: string;
   expiresAt: string;
-  status: "pending_review" | "cancelled";
+  status:
+    | "pending_review"
+    | "approved"
+    | "in_progress"
+    | "completed"
+    | "needs_review"
+    | "cancelled";
+  confirmationHash?: string;
+  approvedAt?: string;
+  lastError?: string;
 };
 
-export type BulkCleanupRunSummary = Omit<BulkCleanupRun, "candidateIds">;
+export type BulkCleanupRunSummary = Omit<
+  BulkCleanupRun,
+  "candidateIds" | "confirmationHash"
+>;
 
 type StateDocument = {
   version: 1;
@@ -166,6 +179,7 @@ export class CleanupStateStore {
       ...input,
       id: randomUUID(),
       candidateCount: input.candidateIds.length,
+      completedCount: 0,
       createdAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + BULK_RUN_TTL_MS).toISOString(),
       status: "pending_review",
@@ -193,9 +207,102 @@ export class CleanupStateStore {
       .map(
         (run) =>
           Object.fromEntries(
-            Object.entries(run).filter(([key]) => key !== "candidateIds"),
+            Object.entries(run).filter(
+              ([key]) => key !== "candidateIds" && key !== "confirmationHash",
+            ),
           ) as BulkCleanupRunSummary,
       );
+  }
+
+  async approveBulkRun(id: string): Promise<
+    Omit<BulkCleanupRun, "confirmationHash" | "candidateIds"> & {
+      confirmationToken: string;
+    }
+  > {
+    const confirmationToken = randomBytes(24).toString("base64url");
+    let output!: Omit<BulkCleanupRun, "confirmationHash" | "candidateIds"> & {
+      confirmationToken: string;
+    };
+    await this.mutate((state) => {
+      const run = state.bulkRuns.find((item) => item.id === id);
+      if (!run) throw new Error("Bulk cleanup run not found");
+      if (run.status !== "pending_review") {
+        throw new Error(`Bulk cleanup run is ${run.status}`);
+      }
+      if (run.expiresAt <= new Date().toISOString()) {
+        throw new Error("Bulk cleanup run expired");
+      }
+      const now = new Date().toISOString();
+      run.confirmationHash = tokenHash(confirmationToken);
+      run.approvedAt = now;
+      run.status = "approved";
+      const {
+        candidateIds: _candidateIds,
+        confirmationHash: _hash,
+        ...summary
+      } = run;
+      void _candidateIds;
+      void _hash;
+      output = { ...summary, confirmationToken };
+    });
+    return output;
+  }
+
+  async claimBulkRun(
+    id: string,
+    confirmationToken: string,
+  ): Promise<BulkCleanupRun> {
+    let run!: BulkCleanupRun;
+    await this.mutate((state) => {
+      run = state.bulkRuns.find((item) => item.id === id)!;
+      if (!run) throw new Error("Bulk cleanup run not found");
+      if (run.status !== "approved") {
+        throw new Error(`Bulk cleanup run is ${run.status}`);
+      }
+      if (run.expiresAt <= new Date().toISOString()) {
+        throw new Error("Bulk cleanup run expired");
+      }
+      if (
+        !run.confirmationHash ||
+        tokenHash(confirmationToken) !== run.confirmationHash
+      ) {
+        throw new Error("Bulk cleanup confirmation token is invalid");
+      }
+      run.status = "in_progress";
+    });
+    return run;
+  }
+
+  async advanceBulkRun(
+    id: string,
+    completedCount: number,
+  ): Promise<BulkCleanupRun> {
+    let run!: BulkCleanupRun;
+    await this.mutate((state) => {
+      run = state.bulkRuns.find((item) => item.id === id)!;
+      if (!run) throw new Error("Bulk cleanup run not found");
+      if (run.status !== "in_progress") {
+        throw new Error(`Bulk cleanup run is ${run.status}`);
+      }
+      if (!Number.isInteger(completedCount) || completedCount < 0) {
+        throw new Error("completedCount must not be negative");
+      }
+      run.completedCount += completedCount;
+      if (run.completedCount >= run.candidateCount) {
+        run.completedCount = run.candidateCount;
+        run.status = "completed";
+      }
+    });
+    return run;
+  }
+
+  async flagBulkRunForReview(id: string, error?: string): Promise<void> {
+    await this.mutate((state) => {
+      const run = state.bulkRuns.find((item) => item.id === id);
+      if (!run) throw new Error("Bulk cleanup run not found");
+      run.status = "needs_review";
+      if (error) run.lastError = error.slice(0, 500);
+    });
   }
 
   async claimPlan(id: string, confirmationToken: string): Promise<StoredPlan> {
@@ -550,7 +657,10 @@ export class CleanupStateStore {
               : [],
           bulkRuns:
             "bulkRuns" in value && Array.isArray(value.bulkRuns)
-              ? (value.bulkRuns as BulkCleanupRun[])
+              ? (value.bulkRuns as BulkCleanupRun[]).map((run) => ({
+                  ...run,
+                  completedCount: run.completedCount ?? 0,
+                }))
               : [],
         };
       }

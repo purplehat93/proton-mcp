@@ -280,9 +280,13 @@ selected messages still exist before changing mail.
 messages, freezes the matching opaque ids into a persisted manifest, and
 returns a review summary plus a manifest digest. It never changes mail and it
 does not create a confirmation token. `bulk_cleanup_history` lists these
-review-only manifests. Bulk execution is intentionally not part of this
-phase; a later workflow must approve the immutable manifest before applying
-bounded chunks.
+review-only manifests. `approve_bulk_cleanup_run` creates a one-time
+confirmation token without changing mail. `apply_bulk_cleanup_run` consumes
+that approval and applies the immutable manifest through internal 50-message
+cleanup plans, recording progress and operation history after each successful
+chunk. A failed or interrupted chunk is marked for review and is never retried
+automatically. The run may contain up to 12,000 messages; larger mailboxes
+should be processed as multiple manifests.
 
 `create_cleanup_plan` accepts an action and 1-50 explicit opaque ids from one
 folder. Move and copy plans require a destination. It returns an immutable plan

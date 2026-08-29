@@ -46,6 +46,55 @@ describe("cleanup workflow state", () => {
     await expect(store.getBulkRun(run.id)).resolves.toEqual(run);
   });
 
+  it("approves a bulk manifest once without exposing its token hash", async () => {
+    const store = await stateStore();
+    const run = await store.createBulkRun({
+      action: "trash",
+      sourceFolder: "INBOX",
+      criteria: { subject: "old" },
+      candidateIds: ["message-1"],
+      manifestDigest: "digest",
+    });
+
+    const approval = await store.approveBulkRun(run.id);
+    expect(approval.confirmationToken).toBeTruthy();
+    expect(approval).not.toHaveProperty("confirmationHash");
+    await expect(store.listBulkRuns()).resolves.toEqual([
+      expect.objectContaining({ status: "approved", completedCount: 0 }),
+    ]);
+    await expect(store.approveBulkRun(run.id)).rejects.toThrow(
+      /Bulk cleanup run is approved/,
+    );
+    await expect(store.claimBulkRun(run.id, "wrong-token")).rejects.toThrow(
+      /confirmation token is invalid/,
+    );
+    await expect(
+      store.claimBulkRun(run.id, approval.confirmationToken),
+    ).resolves.toMatchObject({ status: "in_progress" });
+  });
+
+  it("tracks bulk progress and completion", async () => {
+    const store = await stateStore();
+    const run = await store.createBulkRun({
+      action: "archive",
+      sourceFolder: "INBOX",
+      criteria: { seen: true },
+      candidateIds: ["message-1", "message-2"],
+      manifestDigest: "digest",
+    });
+    const approval = await store.approveBulkRun(run.id);
+    await store.claimBulkRun(run.id, approval.confirmationToken);
+
+    await expect(store.advanceBulkRun(run.id, 1)).resolves.toMatchObject({
+      status: "in_progress",
+      completedCount: 1,
+    });
+    await expect(store.advanceBulkRun(run.id, 1)).resolves.toMatchObject({
+      status: "completed",
+      completedCount: 2,
+    });
+  });
+
   it("returns a one-time token without exposing its stored hash", async () => {
     const store = await stateStore();
     const plan = await store.createPlan({
