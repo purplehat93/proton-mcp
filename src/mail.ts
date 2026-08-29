@@ -96,6 +96,9 @@ export type CleanupCandidatesInput = SearchMailInput & {
 
 export type BulkSearchInput = SearchMailInput & {
   scanLimit?: number;
+  excludeFrom?: string[];
+  excludeDomains?: string[];
+  excludeSubjectTerms?: string[];
 };
 
 export type MailboxAnalysisInput = SearchMailInput & {
@@ -665,8 +668,32 @@ export class ProtonMailbox {
         });
         const uids = Array.isArray(found) ? found : [];
         const candidates = uids.slice(-scanLimit);
+        const summaries = await fetchSummaries(client, folder, candidates);
+        const excludedSenders = new Set(
+          (input.excludeFrom ?? []).map((value) => value.toLowerCase()),
+        );
+        const excludedDomains = (input.excludeDomains ?? []).map((value) =>
+          value.toLowerCase(),
+        );
+        const excludedSubjectTerms = (input.excludeSubjectTerms ?? []).map(
+          (value) => value.toLowerCase(),
+        );
+        const messages = summaries.filter((message) => {
+          const address = message.from.address?.toLowerCase() ?? "";
+          const subject = message.subject?.toLowerCase() ?? "";
+          if (excludedSenders.has(address)) return false;
+          if (
+            excludedDomains.some(
+              (domain) => address === domain || address.endsWith(`@${domain}`),
+            )
+          )
+            return false;
+          if (excludedSubjectTerms.some((term) => subject.includes(term)))
+            return false;
+          return true;
+        });
         return {
-          messages: await fetchSummaries(client, folder, candidates),
+          messages,
           scanned: candidates.length,
           truncated: uids.length > candidates.length,
         };

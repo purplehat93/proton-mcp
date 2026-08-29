@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { CleanupStateStore } from "./state.js";
+import { bulkManifestDigest, CleanupStateStore } from "./state.js";
 
 const tempDirs: string[] = [];
 
@@ -30,20 +30,103 @@ describe("cleanup workflow state", () => {
       sourceFolder: "INBOX",
       criteria: { folder: "INBOX", seen: true },
       candidateIds: ["message-1", "message-2"],
-      manifestDigest: "digest",
+      manifestDigest: bulkManifestDigest(["message-1", "message-2"]),
     });
 
     expect(run).toMatchObject({
       action: "archive",
       candidateCount: 2,
       status: "pending_review",
-      manifestDigest: "digest",
+      manifestDigest: bulkManifestDigest(["message-1", "message-2"]),
     });
     const summaries = await store.listBulkRuns();
     expect(summaries).toHaveLength(1);
     expect(summaries[0]).toMatchObject({ candidateCount: 2 });
     expect(summaries[0]).not.toHaveProperty("candidateIds");
     await expect(store.getBulkRun(run.id)).resolves.toEqual(run);
+  });
+
+  it("approves a bulk manifest once without exposing its token hash", async () => {
+    const store = await stateStore();
+    const run = await store.createBulkRun({
+      action: "trash",
+      sourceFolder: "INBOX",
+      criteria: { subject: "old" },
+      candidateIds: ["message-1"],
+      manifestDigest: bulkManifestDigest(["message-1"]),
+    });
+
+    const approval = await store.approveBulkRun(run.id);
+    expect(approval.confirmationToken).toBeTruthy();
+    expect(approval).not.toHaveProperty("confirmationHash");
+    await expect(store.listBulkRuns()).resolves.toEqual([
+      expect.objectContaining({ status: "approved", completedCount: 0 }),
+    ]);
+    await expect(store.approveBulkRun(run.id)).rejects.toThrow(
+      /Bulk cleanup run is approved/,
+    );
+    await expect(store.claimBulkRun(run.id, "wrong-token")).rejects.toThrow(
+      /confirmation token is invalid/,
+    );
+    await expect(
+      store.claimBulkRun(run.id, approval.confirmationToken),
+    ).resolves.toMatchObject({ status: "in_progress" });
+  });
+
+  it("rejects a bulk manifest with a mismatched digest", async () => {
+    const store = await stateStore();
+    await expect(
+      store.createBulkRun({
+        action: "trash",
+        sourceFolder: "INBOX",
+        criteria: { seen: true },
+        candidateIds: ["message-1"],
+        manifestDigest: "not-the-digest",
+      }),
+    ).rejects.toThrow(/manifest digest is invalid/);
+  });
+
+  it("tracks bulk progress and completion", async () => {
+    const store = await stateStore();
+    const run = await store.createBulkRun({
+      action: "archive",
+      sourceFolder: "INBOX",
+      criteria: { seen: true },
+      candidateIds: ["message-1", "message-2"],
+      manifestDigest: bulkManifestDigest(["message-1", "message-2"]),
+    });
+    const approval = await store.approveBulkRun(run.id);
+    await store.claimBulkRun(run.id, approval.confirmationToken);
+
+    await expect(store.advanceBulkRun(run.id, 1)).resolves.toMatchObject({
+      status: "in_progress",
+      completedCount: 1,
+    });
+    await expect(store.advanceBulkRun(run.id, 1)).resolves.toMatchObject({
+      status: "completed",
+      completedCount: 2,
+    });
+  });
+
+  it("allows a paused approved run to continue from persisted progress", async () => {
+    const store = await stateStore();
+    const run = await store.createBulkRun({
+      action: "trash",
+      sourceFolder: "INBOX",
+      criteria: { seen: true },
+      candidateIds: ["message-1", "message-2"],
+      manifestDigest: bulkManifestDigest(["message-1", "message-2"]),
+    });
+    const approval = await store.approveBulkRun(run.id);
+    await store.claimBulkRun(run.id, approval.confirmationToken);
+    await store.advanceBulkRun(run.id, 1);
+    await expect(store.pauseBulkRun(run.id)).resolves.toMatchObject({
+      status: "approved",
+      completedCount: 1,
+    });
+    await expect(
+      store.claimBulkRun(run.id, approval.confirmationToken),
+    ).resolves.toMatchObject({ status: "in_progress", completedCount: 1 });
   });
 
   it("returns a one-time token without exposing its stored hash", async () => {

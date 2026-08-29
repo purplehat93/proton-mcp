@@ -280,9 +280,19 @@ selected messages still exist before changing mail.
 messages, freezes the matching opaque ids into a persisted manifest, and
 returns a review summary plus a manifest digest. It never changes mail and it
 does not create a confirmation token. `bulk_cleanup_history` lists these
-review-only manifests. Bulk execution is intentionally not part of this
-phase; a later workflow must approve the immutable manifest before applying
-bounded chunks.
+review-only manifests. `approve_bulk_cleanup_run` creates a one-time
+confirmation token without changing mail. `apply_bulk_cleanup_run` consumes
+that approval and applies the immutable manifest through internal 50-message
+cleanup plans, recording progress and operation history after each successful
+chunk. A failed or interrupted chunk is marked for review and is never retried
+automatically. The run may contain up to 12,000 messages; larger mailboxes
+should be processed as multiple manifests. `maxChunks` limits work per request;
+when a run pauses between requests, the same approval token continues it.
+`bulk_cleanup_progress` returns the compact progress view for one run.
+Bulk candidate creation accepts optional exact sender, sender-domain, and
+case-insensitive subject-term exclusions; excluded messages are never placed
+in the manifest. The service verifies the manifest digest before approval and
+execution.
 
 `create_cleanup_plan` accepts an action and 1-50 explicit opaque ids from one
 folder. Move and copy plans require a destination. It returns an immutable plan
@@ -311,8 +321,9 @@ trash, and move; only move requires a destination.
 messages, returns candidate metadata, and creates a standard one-time cleanup
 plan when matches exist. It never changes mail itself. `automation_history`
 returns no-match, pending-confirmation, applied, and needs-review run records.
-There is no schedule, background execution, full-body matching, or permanent
-deletion.
+There is no background mailbox mutation, full-body matching, or permanent
+deletion. Optional schedules only create bounded `pending_review` history and
+never create confirmation tokens or apply plans.
 
 `update_automation_rule` replaces a disabled rule. `delete_automation_rule`
 requires a disabled rule, cancels any unused confirmation plan it created, and
